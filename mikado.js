@@ -1,5 +1,6 @@
 /**
- * @author Ben Gerrissen
+ * @author Ben Gerrissen http://www.netben.nl
+ * @license MIT
  */
 var mikado = (function() {
 	var library = {};
