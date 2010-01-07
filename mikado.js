@@ -274,18 +274,89 @@ var mikado = (function() {
 		}
 	};
 	
-	function empty() {
-	}
+	// empty function used by instantiateModule
+	function empty() {}
 	
-	function instantiateModule(mod, args) {
-		if (typeof mod == "function") {
-			empty.prototype = mod.prototype;
-			var obj = new empty();
-			mod.apply(obj, args);
+	/**Internal method to instantiate a modules prototype and apply it's constructor
+	 * with an arguments object.
+	 * 
+	 * @param {Function} 	mod		Module
+	 * @param {Object} 		args	Arguments object
+	 */
+	function instantiateModule(module, args) {
+		if (typeof module == "function") {
+			empty.prototype = module.prototype;
+			var instance = new empty();
+			module.apply(instance, args);
 		}
 	}
 	
 	return {
+		/**@method mikado#add(record)
+		 * 
+		 * Adds a record containing module settings and the module build method to mikado.
+		 * If all dependencies (include/fetch settings) are already loaded by mikado, it *builds* the module by invoking the "build" function setting.
+		 * When dependencies need to be loaded, they will be loaded first before the build method gets invoked.
+		 * 
+		 * @param {Object} 		record				Hash; key = setting name, value = setting value.
+		 * @param {String} 		record.path			Dot notated path to module file (omit extention).
+		 * 
+		 * 						This settings is REQUIRED and is CASE SENSITIVE, 
+		 * 						the path is resolved from mikado root or maps to a repository token.
+		 * 						Examples:
+		 * 						-> "home.cat.Module" 		translates to 	rootPath + "/home/cat/Module.js"
+		 * 						-> "ext:cat.Module"	translates to 	repositoryPath + "/cat/Module.js"
+		 * 						In the above example, the "ext" token needs to be defined through mikado#set repositories {ext : "URL"}
+		 * 
+		 * @param {Array} 		record.include		A list of modules that will be loaded (if needed), attached to a Hash object and passed to the build function when invoked.
+		 * 
+		 * 						Listings (paths) need to be equal to the path notation defined in the target module file.
+		 * 						Repository tokens (if any) will be ignored by mikado.
+		 * 
+		 * @param {Array} 		record.fetch		Same as record.include, except loaded modules will NOT be passed to the build method.
+		 * 
+		 * 						Fetching should be used to force paralel loading for the dependencies of included modules.
+		 * 						For example, if the current module includes "some.Module" and that module has a dependency to "other.Module"
+		 * 						"other.Module" then needs to be fetched unless it's directly used by the current module as well, in that case, include the sub dependency.
+		 * 
+		 * @param {Array} 		record.allow		A list of modules that are allowed to use the current module as include.
+		 * 
+		 * 						If the current module is loaded by a module that is not allowed, that module will not receive the current module in it's build parameter.
+		 * 						This option should ONLY be used by security sensitive modules, though there is NO guarantee the module contents will be safe.						
+		 * 						This is just a means to make it harder to access sensitive data or functionality.
+		 * 
+		 * @param {Number} 		record.killTime		A means to adjust killtime for dependency loading, but NOT the current module.
+		 * 						
+		 * 						
+		 * @param {Function}	record.build		Module construction sandbox, receives a single Hash object as parameter containing included modules.
+		 * 						
+		 * 						The build method is based on a commonly used self invoking function pattern to keep variables out of the global scope.
+		 * 						Instead of self invoking, mikado invokes the build method once all dependencies are loaded or present.
+		 * 						The dependencies will be available on the single Hash object passed to the build method.
+		 * 						
+		 * 						example:
+		 * 
+		 * 							...
+		 * 							build : function(lib) {
+		 * 								var x = new lib.LoadedModule("someArgument");
+		 * 								... CODE ...
+		 * 								
+		 * 								function TheModule() { ...CODE... }
+		 * 								
+		 * 								return TheModule;
+		 * 							}
+		 * 							...
+		 * 						
+		 * 						The return value of the build method will be stored as the actual module inside mikado
+		 * 						and assigned as dependency for other modules. The module does NOT have to be a function, it can also
+		 * 						be a singleton object containing methods.
+		 * 
+		 * 						Note! Though the "path" setting implies namespaces, the path namespace is actually abstracted away.
+		 * 						Namespacing from module target will be preserved.
+		 * 
+		 * 						Since mikado abstracts away from a global namespace containing everything it is possible to load
+		 * 						modules with similar names, though only one can be assigned as a dependency for another module.
+		 */
 		add: function(record) {
 			if (settings.debug) {
 				if (typeof record.path != "string") {
@@ -304,6 +375,24 @@ var mikado = (function() {
 			sys.processModule(record);
 			return this;
 		},
+		
+		/**@method mikado#use(list[, callback[, killtime]])
+		 * 
+		 * Loads modules and when all modules are (already) loaded, attaches the modules
+		 * to a Hash object and fires the callback (if any) function passing the hash as single argument.
+		 * Can also be used to simply preload modules when omitting the callback.
+		 * The mikado default killtime can be overridden without changing the default setting.
+		 * 
+		 * @param {Array} 		list			Array containing a list of module paths to load.
+		 * @param {Function} 	callback		Callback function that gets called when all modules in the list are loaded.
+		 * 
+		 * 						The callback function will have an Hash as only argument containing references to the loaded modules
+		 * 						from the passed list.
+		 * 
+		 * @param {Number} 		killTime		Killtime override for this specific transaction.
+		 * 
+		 * 						See mikado#set for more information about killtime.
+		 */
 		use: function(list, callback, killTime) {
 			var manifest = {
 				list: sys.enforce(list),
@@ -325,6 +414,19 @@ var mikado = (function() {
 			sys.load(manifest);
 			return this;
 		},
+		
+		/**@method mikado#run(modulePath [, arguments])
+		 * 
+		 * Instantiates a loaded module or first loads the module and then instantiates it.
+		 * If the target module is a function, it will always be instantiated through the "new" operator.
+		 * The instance is NOT returned through this means of instantiation.
+		 * 
+		 * See mikado#use if you want to use mikado in a more inline fashion.
+		 * 
+		 * @param {Object} 		modulePath				Path to a single module, preferably an initializer.
+		 * @param {variable}	arguments				Any number of arguments the initializer might require/allow.
+		 * @return {Void}								
+		 */
 		run: function(modulePath /*, arguments*/ ) {
 			var args = Args(arguments, 1);
 			if (library[modulePath]) {
@@ -339,6 +441,44 @@ var mikado = (function() {
 			}
 			return this;
 		},
+		
+		/**@method mikado#set(params)
+		 * 
+		 * Changes mikado settings passed with a hash object.
+		 * 
+		 * @param {Object} 		params					Hash; key = setting name, value = setting value.
+		 * @param {Number} 		params.killTime 		Max time in milliseconds a module gets to load before being killed.
+		 * 
+		 * 						A killed/timed-out module or modules that had a dependency to the killed module
+		 * 						will never be build nor instantiated. Adjust accordingly when you use huge modules/scripts.
+		 * 						This setting exists to allow users with slow connections to enjoy content without
+		 * 						javascript bogging things down.
+		 * 
+		 * @param {String} 		params.root				Root directory of mikado.js
+		 * 
+		 * 						By default mikado attempts to set the root to the same directory mikado.js
+		 * 						resides in, though this might fail in certain browser environments.
+		 * 						To ensure default repository loading, set the root directory of mikado.js
+		 * 
+		 * @param {DomElement} 	params.scriptLocation	Element to which scripts will be appended.
+		 * 
+		 * 						By default scripts are loaded in the <HEAD> element of a HTML document.
+		 * 
+		 * @param {Object}		params.repositories		Hash; key = repository token, value = URL.
+		 * 
+		 * 						This allows module loading from other repositories/urls through a identifier token.
+		 * 						This token is then used in module include/fetch declarations as "token:path.ModuleName"
+		 * 						and mikado will lookup the path in the external repository.
+		 * 
+		 * @param {Object}		params.force			Hash; key = Module Name, value = path.
+		 * 
+		 * 						Forced modules will be used instead of modules with identical names.
+		 * 						For example, if the module "Selector" is forced to path "home.css.Selector"
+		 * 						that module will be used instead over another included module like "com.Selector".
+		 * 						The other module will never be loaded.
+		 * 
+		 * @return {Void}
+		 */
 		set: function(params) {
 			for (var key in params) {
 				if (/(?:repositories|force)/.test(key)) {
