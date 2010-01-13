@@ -19,6 +19,10 @@ Also trying to make mikado more robust and add proper errors (helpful ones ;) ).
 * Tries to provide better dynamic and asynchronous scaling.
 * Tries to keep development simple and more JavaScripty.
 
+Basically, any library that is written like or similar to:
+var LIB = (function(){ /* CODE */ })();
+can be included as a mikado module!
+
 ### License ###
 
 Mikado is licensed under the terms of the MIT License, see the included MIT-LICENSE file.
