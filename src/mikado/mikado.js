@@ -207,7 +207,7 @@ var mikado = function() {
 		});
 		var index = pending[path].length;
 		while(i--) {
-			killerToDomRead(pending[path][index].path);
+			killerToDomReady(pending[path][index].path);
 		}
 	}
 	
@@ -312,6 +312,7 @@ var mikado = function() {
 	}
 	
 	function cleanUp(path) {
+		console.log(path)
 		delete pending[path];
 		stopKiller(path);
 		delete killers[path];
@@ -410,6 +411,40 @@ var mikado = function() {
 			return this;
 		},
 		
+		/**Loads modules into mikado memory if not already loaded.
+		 * @param {Array} list
+		 * 		Array with dot notated paths to module files, relative to mikado root or repository.
+		 * 
+		 * @param {Number} timeout
+		 * 		Overrides mikado default timeout setting.
+		 * 
+		 * @return {Object} mikado
+		 */
+		fetch: function(list, timeout) {
+			if(list instanceof Array) {
+				var index = list.length;
+				while(i--) {
+					loadDependency(list[index], timeout);
+				}
+			}
+			return this;
+		},
+		
+		/**Modeled after YUI3's use method, load dependencies and fire a callback function when done.
+		 * 
+		 * @param {String} paths (multiple possible)
+		 * 		One or more dot notated paths to module files, relative from mikado root or repository.
+		 * 		Pass each path as a seperate argument.
+		 * 
+		 * @param {Function} callback
+		 * 		Callback function that will be invoked after all dependencies are present in mikado library.
+		 * 		The callback will receive a single argument containing the dependencies.
+		 * 
+		 * @param {Number} timeout
+		 * 		Override default timeout setting for this specific load action.
+		 * 
+		 * @return {Object} mikado
+		 */
 		use: function(/* list MULTIPLE POSSIBLE, callback, timeout */) {
 			var list = Args(arguments), index = list.length, timeout, callback, undefined, lib = {}, domTool;
 			
@@ -449,8 +484,44 @@ var mikado = function() {
 				}
 			}
 			
+			return this;
 		},
 		
+		/**Changes mikado internal settings.
+		 * 
+		 * @param {Object} params
+		 * 		Following settings are mutable:
+		 * 		setting		    type	                       description
+		 * 		+---------------+----------+------------------------------------------+
+		 * 		| timeout		| Number   | Number of milliseconds allowed for any   |
+		 * 		|               |          | single module to load. When a module     |
+		 * 		|               |          | times out, it will fail silently, but    |
+		 * 		|               |          | leaves the script tag intact with a      |
+		 * 		|               |          | message in it's type attribute           |
+		 * 		+---------------+----------+------------------------------------------+
+		 * 		| root   		| String   | Relative or absolute path to mikado.js   |
+		 * 		|               |          | location. Mikado tries to set this       |
+		 * 		|               |          | automatically, but setting it directly   |
+		 * 		|               |          | can be more robust and failsafe.         |
+		 * 		+---------------+----------+------------------------------------------+
+		 * 		| scriptLocation| Element  | Relative or absolute path to mikado.js   |
+		 * 		|               |          | location. Mikado tries to set this       |
+		 * 		|               |          | automatically, but setting it directly   |
+		 * 		|               |          | can be more robust and failsafe.         |
+		 * 		+---------------+----------+------------------------------------------+
+		 * 		| repositories  | Object   | A hash table (object) where keys signify |
+		 * 		|               |          | tokens to be used as a means to super-   |
+		 * 		|               |          | impose another URI to a module path and  |
+		 * 		|               |          | values as the actual URL.				  |
+		 * 		|               |          | To load a module from a repository,      |
+		 * 		|               |          | prefix the module path with [token]:     |
+		 * 		|               |          | so a path looks like:   				  |
+		 * 		|               |          |       "org:widgets.lists.Accordion"	  |
+		 * 		|               |          | and the repository setting looks like:	  |
+		 * 		|               |          |       {org:"http://someurl.org/js/"}     |
+		 * 		|               |          | !!USE WITH EXTREME CAUTION!!		      |
+		 * 		+---------------+----------+------------------------------------------+
+		 */
 		settings: function(params) {
 			for (var key in params) {
 				if (/(?:repositories|force)/.test(key)) {
