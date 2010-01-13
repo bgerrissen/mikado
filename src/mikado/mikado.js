@@ -130,6 +130,7 @@ var mikado = function() {
 	var loadDispatcher = EventDispatcher();
 	
 	function loadDependencies(record) {
+		
 		if (!record.fetch) {
 			return;
 		}
@@ -160,13 +161,15 @@ var mikado = function() {
 				pending[path] = [];
 			}
 			pending[path].push(record);
-			
 			loadDependency(path, record.timeout);
 			loadDispatcher.add(path, record.dependencyListener);
 		}
 	}
 	
 	function loadDependency(path, timeout) {
+		if (!pending[path]) {
+			pending[path] = [];
+		}
 		scripts[path] = scriptFragment.cloneNode(true);
 		scripts[path].src = createFullPath(path);
 		settings.scriptLocation.appendChild(scripts[path]);
@@ -224,7 +227,7 @@ var mikado = function() {
 	}
 	
 	function getNameFromPath(path) {
-		return path.split(".").pop();
+		return path ? path.split(".").pop() : "";
 	}
 	
 	function createFullPath(path) {
@@ -276,8 +279,33 @@ var mikado = function() {
 		}
 	}
 	
-	function processRecord(record) {
+	function resolvePath(record) {
+		var name = record.name || getNameFromPath(record.path);
+		var path = record.path || name;
+		
+		if(!name) {
+			throw "ERROR: loaded module does not contain a required 'path' or optional 'name' setting!!";
+		}
+		
+		if(!pending[path]) {
+			var candidates = [];
+			for(var key in pending) {
+				if(name == getNameFromPath(key)) {
+					candidates.push(key);
+				}
+			}
+			if(candidates.length == 1) {
+				record.path = candidates[0];
+			} else {
+				throw "ERROR: could not resolve incorrect path: '"+path+"'";
+			}
+		}
+	}
 	
+	function processRecord(record) {
+		
+		resolvePath(record);
+		
 		record.name = getNameFromPath(record.path);
 		reformatAllowed(record);
 		setRequired(record);
@@ -289,7 +317,7 @@ var mikado = function() {
 	}
 	
 	function storeRecord(record) {
-	
+		
 		if (record.domBuild && !domLoaded) {
 			killerToDomReady(killerToDomReady(record.path));
 			return domReady(function() {
@@ -312,7 +340,6 @@ var mikado = function() {
 	}
 	
 	function cleanUp(path) {
-		console.log(path)
 		delete pending[path];
 		stopKiller(path);
 		delete killers[path];
@@ -340,48 +367,48 @@ var mikado = function() {
 		}
 	}
 	
-	return {
+	var api = {
 		/**Adds a module to the mikado library.
 		 * 
 		 * @param {Object} record REQUIRED
-		 * 		Settings and attributes for the current module, order is NOT significant.
-
-		 * 		setting		    type	   required             description
-		 * 		+---------------+----------+--------+---------------------------------+
-		 * 		| path			| String   | yes    | Dot notated path to module file |
-		 * 		|               |          |        | relative to root or repository. |
-		 * 		+---------------+----------+--------+---------------------------------+
-		 * 		| build(lib)    | Function | yes    | Builder sandbox, gets executed  |
-		 * 		|               |          |        | once module is loaded and should|
-		 * 		|               |          |        | return the final module. The    |
+		 * 	    Settings and attributes for the current module, order is NOT significant.
+		 * 
+		 * 	    setting		    type	   required             description
+		 * 	    +---------------+----------+--------+---------------------------------+
+		 * 	    | path			| String   | yes    | Dot notated path to module file |
+		 * 	    |               |          |        | relative to root or repository. |
+		 * 	    +---------------+----------+--------+---------------------------------+
+		 * 	    | build(lib)    | Function | yes    | Builder sandbox, gets executed  |
+		 * 	    |               |          |        | once module is loaded and should|
+		 * 	    |               |          |        | return the final module. The    |
  		 *      |               |          |        | build method will get a lib     |
 		 *      |               |          |        | argument containing all included|
 		 *      |               |          |        | modules						  |
-		 * 		+---------------+----------+--------+---------------------------------+
-		 * 		| include       | Array    | no     | List of other module paths which|
+		 * 	    +---------------+----------+--------+---------------------------------+
+		 * 	    | include       | Array    | no     | List of other module paths which|
 		 *      |               |          |        | are either required to build or |
 		 *      |               |          |        | are being used by the current   |
 		 *      |               |          |        | module. Included modules are    |
 		 *      |               |          |        | added to the build lib argument.|
-		 * 		+---------------+----------+--------+---------------------------------+
-		 * 		| fetch         | Array    | no     | List of other module paths which|
+		 * 	    +---------------+----------+--------+---------------------------------+
+		 * 	    | fetch         | Array    | no     | List of other module paths which|
 		 *      |               |          |        | will be loaded but not added to |
 		 *      |               |          |        | the build lib argument. Fetch   |
 		 *      |               |          |        | is intended to load sub         |
 		 *      |               |          |        | dependencies for faster loading.|
-		 * 		+---------------+----------+--------+---------------------------------+
-		 * 		| domBuild		| Boolean  | no     | Signify if build method requires|
-		 * 		|   			|		   |        | DOM to build module properly.   |
-		 * 		+---------------+----------+--------+---------------------------------+
+		 * 	    +---------------+----------+--------+---------------------------------+
+		 * 	    | domBuild		| Boolean  | no     | Signify if build method requires|
+		 * 	    |   			|		   |        | DOM to build module properly.   |
+		 * 	    +---------------+----------+--------+---------------------------------+
 		 *      | domTool       | Boolean  | no     | Signify if DOM is required      |
 		 *      |               |          |        | before module can be used.      |
-		 * 		+---------------+----------+--------+---------------------------------+
-		 * 		| allow         | Array    | no     | List of other module path which |
+		 * 	    +---------------+----------+--------+---------------------------------+
+		 * 	    | allow         | Array    | no     | List of other module path which |
 		 *      |               |          |        | are allowed to use this module  |
 		 *      |               |          |        | otherwise other modules CAN load|
 		 *      |               |          |        | this module but won't be added  |
 		 *      |               |          |        | the passed lib argument.        |
-		 * 		+---------------+----------+--------+---------------------------------+
+		 * 	    +---------------+----------+--------+---------------------------------+
 		 * 
 		 * @return void
 		 */
@@ -490,37 +517,37 @@ var mikado = function() {
 		/**Changes mikado internal settings.
 		 * 
 		 * @param {Object} params
-		 * 		Following settings are mutable:
-		 * 		setting		    type	                       description
-		 * 		+---------------+----------+------------------------------------------+
-		 * 		| timeout		| Number   | Number of milliseconds allowed for any   |
-		 * 		|               |          | single module to load. When a module     |
-		 * 		|               |          | times out, it will fail silently, but    |
-		 * 		|               |          | leaves the script tag intact with a      |
-		 * 		|               |          | message in it's type attribute           |
-		 * 		+---------------+----------+------------------------------------------+
-		 * 		| root   		| String   | Relative or absolute path to mikado.js   |
-		 * 		|               |          | location. Mikado tries to set this       |
-		 * 		|               |          | automatically, but setting it directly   |
-		 * 		|               |          | can be more robust and failsafe.         |
-		 * 		+---------------+----------+------------------------------------------+
-		 * 		| scriptLocation| Element  | Relative or absolute path to mikado.js   |
-		 * 		|               |          | location. Mikado tries to set this       |
-		 * 		|               |          | automatically, but setting it directly   |
-		 * 		|               |          | can be more robust and failsafe.         |
-		 * 		+---------------+----------+------------------------------------------+
-		 * 		| repositories  | Object   | A hash table (object) where keys signify |
-		 * 		|               |          | tokens to be used as a means to super-   |
-		 * 		|               |          | impose another URI to a module path and  |
-		 * 		|               |          | values as the actual URL.				  |
-		 * 		|               |          | To load a module from a repository,      |
-		 * 		|               |          | prefix the module path with [token]:     |
-		 * 		|               |          | so a path looks like:   				  |
-		 * 		|               |          |       "org:widgets.lists.Accordion"	  |
-		 * 		|               |          | and the repository setting looks like:	  |
-		 * 		|               |          |       {org:"http://someurl.org/js/"}     |
-		 * 		|               |          | !!USE WITH EXTREME CAUTION!!		      |
-		 * 		+---------------+----------+------------------------------------------+
+		 *      Following settings are mutable:
+		 *      setting		    type	                       description
+		 *      +---------------+----------+------------------------------------------+
+		 * 	    | timeout		| Number   | Number of milliseconds allowed for any   |
+		 * 	    |               |          | single module to load. When a module     |
+		 * 	    |               |          | times out, it will fail silently, but    |
+		 * 	    |               |          | leaves the script tag intact with a      |
+		 * 	    |               |          | message in it's type attribute           |
+		 * 	    +---------------+----------+------------------------------------------+
+		 * 	    | root   		| String   | Relative or absolute path to mikado.js   |
+		 * 	    |               |          | location. Mikado tries to set this       |
+		 * 	    |               |          | automatically, but setting it directly   |
+		 * 	    |               |          | can be more robust and failsafe.         |
+		 * 	    +---------------+----------+------------------------------------------+
+		 * 	    | scriptLocation| Element  | Relative or absolute path to mikado.js   |
+		 * 	    |               |          | location. Mikado tries to set this       |
+		 * 	    |               |          | automatically, but setting it directly   |
+		 * 	    |               |          | can be more robust and failsafe.         |
+		 * 	    +---------------+----------+------------------------------------------+
+		 * 	    | repositories  | Object   | A hash table (object) where keys signify |
+		 * 	    |               |          | tokens to be used as a means to super-   |
+		 * 	    |               |          | impose another URI to a module path and  |
+		 * 	    |               |          | values as the actual URL.				  |
+		 * 	    |               |          | To load a module from a repository,      |
+		 * 	    |               |          | prefix the module path with [token]:     |
+		 * 	    |               |          | so a path looks like:   				  |
+		 * 	    |               |          |       "org:widgets.lists.Accordion"	  |
+		 * 	    |               |          | and the repository setting looks like:	  |
+		 * 	    |               |          |       {org:"http://someurl.org/js/"}     |
+		 * 	    |               |          | !!USE WITH EXTREME CAUTION!!		      |
+		 * 	    +---------------+----------+------------------------------------------+
 		 */
 		settings: function(params) {
 			for (var key in params) {
@@ -537,6 +564,8 @@ var mikado = function() {
 			return this;
 		}
 	};
+	
+	return api;
 	
 };
 mikado = mikado();
