@@ -1,6 +1,10 @@
 Mikado
 =====
 
+**** Casual Message ***
+Working hard to document and create a code base for a good demo.
+Also trying to make mikado more robust and add proper errors (helpful ones ;) ).
+
 **** Module (paralel) loader and alternate dependency resolver ****
 
 * Stand alone; no javascript framework dependency.
