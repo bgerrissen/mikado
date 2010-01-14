@@ -1,6 +1,9 @@
 /**
- * @author Ben Gerrissen http://www.netben.nl
+ * @author Ben Gerrissen http://www.netben.nl/ bgerrissen@gmail.com
  * @license MIT
+ * 
+ * todo: proper documentation!
+ * 
  */
 
 var mikado = function() {

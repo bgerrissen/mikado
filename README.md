@@ -20,7 +20,9 @@ Also trying to make mikado more robust and add proper errors (helpful ones ;) ).
 * Tries to keep development simple and more JavaScripty.
 
 Basically, any library that is written like or similar to:
+
 *var LIB = (function(){ /\* CODE \*/ })();*
+
 can be included as a mikado module!
 
 ### License ###
