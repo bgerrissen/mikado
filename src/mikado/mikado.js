@@ -149,6 +149,7 @@ var mikado = function() {
 			if (!list.length) {
 				storeRecord(record);
 				loadDispatcher.remove(path, record.dependencyListener);
+				return;
 			}
 		}
 		
@@ -159,12 +160,11 @@ var mikado = function() {
 				list.splice(index, 1);
 				continue;
 			}
-			
 			if(!pending[path]) {
 				pending[path] = [];
+				loadDependency(path, record.timeout);
 			}
 			pending[path].push(record);
-			loadDependency(path, record.timeout);
 			loadDispatcher.add(path, record.dependencyListener);
 		}
 	}
@@ -283,6 +283,7 @@ var mikado = function() {
 	}
 	
 	function resolvePath(record) {
+		
 		var name = record.name || getNameFromPath(record.path);
 		var path = record.path || name;
 		
@@ -308,7 +309,6 @@ var mikado = function() {
 	function processRecord(record) {
 		
 		resolvePath(record);
-		
 		record.name = getNameFromPath(record.path);
 		reformatAllowed(record);
 		setRequired(record);
