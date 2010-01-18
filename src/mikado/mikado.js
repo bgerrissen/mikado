@@ -2,614 +2,605 @@
  * @author Ben Gerrissen http://www.netben.nl/ bgerrissen@gmail.com
  * @license MIT
  * 
- * todo: proper documentation!
+ * @version RC1
  * 
+ * @todo
+ * - unit tests
+ * - test new killer mechanism properly
+ * - investigate alternative for domBuild/domTool
+ * - investigate expecting mikado.build to always return an Object or Function.
+ * - backup script element load listeners to check if a script was loaded with no 'mikado.module' call inside.
+ * - More proper error messages.
+ * - Security messages?
+ * 
+ * @notes
+ * 
+ * Still pondering about repository feature, it's far from understandable in current state.
+ * Perhaps require that external repositories to always need the repo token to be set in module
+ * definition paths? Another way is to superimpose the repo token to all dependencies.
+ * 
+ * Dropped mikado.use method, thats more YUI's thing!
+ * 
+ * //noformat -> is a flag for Aptana JS editor, so formatting (ctrl-shift-f)
+ * can only be done by selecting lines of code.
  */
-
-var mikado = function() {
-
-	var library = {};
-	var domLoaded = false;
-	
-	var settings = {
-	
-		timeout: 1500,
-		
-		root: (function() {
-			var scripts = document.getElementsByTagName("script");
-			var re = /\/mikado[^\/\\]*\.js.?$/i;
-			var i = scripts.length;
-			var src;
-			while (i--) {
-				src = scripts[i].src;
-				if (re.test(src)) {
-					return src.replace(re, "");
-				}
-			}
-			return "";
-		})(),
-		
-		scriptLocation: document.getElementsByTagName("head")[0],
-		
-		repositories: {},
-		
-		force: {}
-	
-	};
-	
-	var scriptFragment = document.createElement("script");
-	scriptFragment.type = "text/javascript";
-	
-	var scripts = {};
-	
-	var Args = (function(a, b) {
-		try {
-			var tmp = Array.prototype.slice.call(arguments);
-			if (tmp.length === 2 && tmp[0] === 1 && tmp[1] === 2) {
-				return function(args, from) {
-					return Array.prototype.slice.call(args, from);
-				};
-			}
-		} 
-		catch (e) {
-			// fail
-		}
-		return function(args, from) {
-			var result = [], i = 0, len = args.length;
-			for (i; i < len; i++) {
-				result.push(args[i]);
-			}
-			return result.slice(from);
-		};
-		
-	})(1, 2);
-	
-	
-	var EventDispatcher = function() {
-		var listeners = {};
-		return {
-			add: function(event, listener) {
-				if (!listeners[event]) {
-					listeners[event] = [];
-				}
-				listeners[event].push(listener);
-			},
-			remove: function(event, listener) {
-				if(!event) {
-					return;
-				}
-				if(!listener && listeners[event]) {
-					delete listeners[event];
-					return;
-				}
-				var list = listeners[event], index;
-				if (list && listener) {
-					index = list.length;
-					while (index--) {
-						if (list[index] === listener) {
-							list.splice(index, 1);
-						}
-					}
-				}
-			},
-			dispatch: function(event, listener) {
-				var list = listeners[event];
-				if (list) {
-                    var index = list.length
-					while (index--) {
-						list[index](event);
-					}
-				}
-			}
-		};
-	}
-	
-	var domReady = (function() {
-		var dispatcher = EventDispatcher();
-		function pollDomReady(el) {
-			if (el && !el.nextSibling) {
-				el = document.body.removeChild(el);
-				el = null;
-				domLoaded = true;
-				return dispatcher.dispatch("domReady");
-			} else if (el) {
-				document.body.removeChild(el);
-				el = null;
-			} else if (document.body) {
-				el = document.body.appendChild(document.createElement("span"));
-			}
-			setTimeout(function() {
-				pollDomReady(el);
-			});
-		}
-		pollDomReady();
-		return function(listener) {
-			if (!domLoaded) {
-				dispatcher.add("domReady", listener);
-			} else {
-				listener();
-			}
-		}
-		
-	})();
-	
-	var pending = {};
-	var loadDispatcher = EventDispatcher();
-	
-	var loadDependencies = function(record) {
-		
-        if (!record.fetch) {
-			return;
-		}
-		var list = record.fetch, path, script;
-		
-		record.dependencyListener = function(path) {
-            var index = list.length;
-			while (index--) {
-				if (list[index] === path) {
-					list.splice(index, 1);
-				}
-			}
-			if (!list.length) {
-				storeRecord(record);
-				loadDispatcher.remove(path, record.dependencyListener);
-				return;
-			}
-		}
-		
-		var index = list.length;
-		while (index--) {
-			path = list[index];
-			if (library[path]) {
-				list.splice(index, 1);
-				continue;
-			}
-			if(!pending[path]) {
-				pending[path] = [];
-				loadDependency(path, record.timeout);
-			}
-			pending[path].push(record);
-			loadDispatcher.add(path, record.dependencyListener);
-		}
-	}
-	
-	var loadDependency = function(path, timeout) {
-		if (!pending[path]) {
-			pending[path] = [];
-		}
-		scripts[path] = scriptFragment.cloneNode(true);
-		scripts[path].src = createFullPath(path);
-		settings.scriptLocation.appendChild(scripts[path]);
-		startKiller(path, timeout);
-	}
-	
-	var killers = {};
-	
-	var startKiller = function(path, timeout) {
-		// shutdown timeout mechanism when setting.timeout is set to 0 or fals(y).
-		if(!settings.timeout) {
-			return;
-		}
-		timeout = timeout ? Math.max(settings.timeout, timeout) : settings.timeout;
-		killers[path] = {
-			timeout: timeout,
-			timeoutId: setTimeout(function(){
-				delete pending[path];
-                if(scripts[path])
-				    scripts[path].type = "TIMED OUT ['" + path + "'] @ " + timeout + "ms";
-			}, timeout)
-		}
-	}
-	
-	var stopKiller = function(path) {
-		if (killers[path] && settings.timeout) {
-			clearInterval(killers[path].timeoutId);
-		}
-	}
-	
-	var killerToDomReady = function(path) {
-		if(!settings.timeout) {
-			return;
-		}
-		stopKiller(path);
-		var killer = killers[path];
-		domReady(function(){
-            startKiller(path, killer.timeout);
-		});
-        var index = pending[path].length;
-        while (index--) {
-            killerToDomReady(pending[path][index].path);
-        }
-	}
-	
-	var enforce = function(list) {
-		var i = 0, len = list.length, path, name;
-		for (i; i < len; i++) {
-			path = list[i];
-			name = getNameFromPath(path);
-			if (settings.force[name]) {
-				list[i] = settings.force[name];
-			}
-		}
-		return list;
-	}
-	
-	var getNameFromPath = function(path) {
-		return path ? path.split(".").pop() : "";
-	}
-	
-	var createFullPath = function(path) {
-		if (/^.*:/.test(path)) {
-			var repositoryName = path.replace(/:.*$/, "");
-			var repository = settings.repositories[repositoryName];
-			path = path.replace(/^.*:/, "").replace(/\./g, "/") + ".js";
-			if (!repository) {
-				throw "Error @ mikado->internal 'createFullPath' : No repository set for '" + repositoryName + ":'";
-			}
-			return repository + path;
-			
-		} else {
-			return settings.root + "/" + path.replace(/\./g, "/") + ".js";
-		}
-	}
-	
-	var setRequired = function(record) {
-		record.fetch = record.fetch || [];
-		if (record.include instanceof Array) {
-			record.fetch = record.fetch.concat(record.include);
-		}
-		enforce(record.fetch);
-	}
-	
-	var reformatAllowed = function(record) {
-		if (record.allow instanceof Array) {
-			var c = list.pop(), list = record.allow;
-			record.allow = {};
-			while (c) {
-				record.allow[c] = true;
-				c = list.pop();
-			}
-		}
-	}
-	
-	var setLibs = function(targetRecord) {
-		var list = targetRecord.include, index = list.length, record, path, client = targetRecord.path;
-		targetRecord.lib = {};
-		
-		while (index--) {
-			path = list[index];
-			record = library[path];
-			if (record.allow && !record.allow[client]) {
-				targetRecord.lib[record.name] = "Access denied!";
-				continue;
-			}
-			targetRecord.hasDomTool = targetRecord.hasDomTool || record.domTool || record.hasDomTool;
-			targetRecord.lib[record.name] = record.module;
-		}
-	}
-	
-	var resolvePath = function(record) {
-		
-		var name = record.name || getNameFromPath(record.path);
-		var path = record.path || name;
-		
-		if(!name) {
-			throw "ERROR: loaded module does not contain a required 'path' or optional 'name' setting!!";
-		}
-		
-		if(!pending[path]) {
-			var candidates = [];
-			for(var key in pending) {
-				if(name == getNameFromPath(key)) {
-					candidates.push(key);
-				}
-			}
-			if(candidates.length == 1) {
-				record.path = candidates[0];
-			} else {
-				throw "ERROR: could not resolve incorrect path: '"+path+"'";
-			}
-		}
-	}
-	
-	var processRecord = function(record) {
-		
-        resolvePath(record);
+//noformat
+(function() {
+    
+	/*---------------------------------------------------------------*
+	 *           settings, variables and constants                   *
+	 *---------------------------------------------------------------*/
+    
+    var registry = {},
         
-		record.name = getNameFromPath(record.path);
-		reformatAllowed(record);
-		setRequired(record);
-		loadDependencies(record);
+        domLoaded = 0,
         
-        if (!record.fetch.length) {
-			storeRecord(record);
-		}
-	}
-	
-	var storeRecord = function(record) {
+        GLOBAL = this,
         
-        if (record.domBuild && !domLoaded) {
-			killerToDomReady(record.path);
-			return domReady(function() {
-				storeRecord(record);
-			});
-		}
-		
-		if (record.include instanceof Array) {
-			setLibs(record);
-		}
-		
-		record.module = record.build(record.lib);
-		library[record.path] = record;
-		
-		// notify listeners.
-		loadDispatcher.dispatch(record.path);
+        CONTEXT = GLOBAL.document,
         
-        // clean up
-		cleanUp(record.path);
-	}
-	
-	var cleanUp = function(path) {
-		delete pending[path];
-		stopKiller(path);
-		delete killers[path];
-		scripts[path].parentNode.removeChild(scripts[path]);
-		delete scripts[path];
-	}
-	
-	var empty = function() {
-	}
-	
-	var instantiate = function(record, args) {
-		var module = record.module;
-		
-		if (record.hasDomTool && !domLoaded) {
-			domReady(function() {
-				instantiate(record, args);
-			});
-			return;
-		}
-		
-		if (typeof module == "function") {
-			empty.prototype = module.prototype;
-			var instance = new empty();
-			module.apply(instance, args);
-		}
-	}
-	
-	var api = {
-		/**Adds a module to the mikado library.
-		 * 
-		 * @param {Object} record REQUIRED
-		 * 	    Settings and attributes for the current module, order is NOT significant.
-		 * 
-		 * 	    setting		    type	   required             description
-		 * 	    +---------------+----------+--------+---------------------------------+
-		 * 	    | path			| String   | yes    | Dot notated path to module file |
-		 * 	    |               |          |        | relative to root or repository. |
-		 * 	    +---------------+----------+--------+---------------------------------+
-		 * 	    | build(lib)    | Function | yes    | Builder sandbox, gets executed  |
-		 * 	    |               |          |        | once module is loaded and should|
-		 * 	    |               |          |        | return the final module. The    |
- 		 *      |               |          |        | build method will get a lib     |
-		 *      |               |          |        | argument containing all included|
-		 *      |               |          |        | modules						  |
-		 * 	    +---------------+----------+--------+---------------------------------+
-		 * 	    | include       | Array    | no     | List of other module paths which|
-		 *      |               |          |        | are either required to build or |
-		 *      |               |          |        | are being used by the current   |
-		 *      |               |          |        | module. Included modules are    |
-		 *      |               |          |        | added to the build lib argument.|
-		 * 	    +---------------+----------+--------+---------------------------------+
-		 * 	    | fetch         | Array    | no     | List of other module paths which|
-		 *      |               |          |        | will be loaded but not added to |
-		 *      |               |          |        | the build lib argument. Fetch   |
-		 *      |               |          |        | is intended to load sub         |
-		 *      |               |          |        | dependencies for faster loading.|
-		 * 	    +---------------+----------+--------+---------------------------------+
-		 * 	    | domBuild		| Boolean  | no     | Signify if build method requires|
-		 * 	    |   			|		   |        | DOM to build module properly.   |
-		 * 	    +---------------+----------+--------+---------------------------------+
-		 *      | domTool       | Boolean  | no     | Signify if DOM is required      |
-		 *      |               |          |        | before module can be used.      |
-		 * 	    +---------------+----------+--------+---------------------------------+
-		 * 	    | allow         | Array    | no     | List of other module path which |
-		 *      |               |          |        | are allowed to use this module  |
-		 *      |               |          |        | otherwise other modules CAN load|
-		 *      |               |          |        | this module but won't be added  |
-		 *      |               |          |        | the passed lib argument.        |
-		 * 	    +---------------+----------+--------+---------------------------------+
-		 * 
-		 * @return void
-		 */
-		module: function(record) {
-			processRecord(record);
-		},
-		
-		/**Instantiates (new) module with arguments, loads the module first if not present in mikado library.
-		 * @param {String} path
-		 * 		Dot notated path to module file relative to mikado root or external repository.
-		 * 
-		 * @param {Object} argument(s)
-		 * 		Arguments passed to the module on instantiation. Multiple arguments are possible.
-		 * 
-		 * @return void;
-		 */
-		run: function(path /*, arguments*/) {
-			var args = Args(arguments, 1), record = library[path];
-			if (!record) {
-				loadDispatcher.add(path, function(path) {
-					instantiate(library[path], args);
-				});
-				loadDependency(path);
-			} else {
-				instantiate(record, args);
-			}
-			return this;
-		},
-		
-		/**Loads modules into mikado memory if not already loaded.
-		 * @param {Array} list
-		 * 		Array with dot notated paths to module files, relative to mikado root or repository.
-		 * 
-		 * @param {Number} timeout
-		 * 		Overrides mikado default timeout setting.
-		 * 
-		 * @return {Object} mikado
-		 */
-		fetch: function(list, timeout) {
-			if(list instanceof Array) {
-				var index = list.length;
-				while(i--) {
-					loadDependency(list[index], timeout);
-				}
-			}
-			return this;
-		},
-		
-		/**Modeled after YUI3's use method, load dependencies and fire a callback function when done.
-		 * 
-		 * @param {String} paths (multiple possible)
-		 * 		One or more dot notated paths to module files, relative from mikado root or repository.
-		 * 		Pass each path as a seperate argument.
-		 * 
-		 * @param {Function} callback
-		 * 		Callback function that will be invoked after all dependencies are present in mikado library.
-		 * 		The callback will receive a single argument containing the dependencies.
-		 * 
-		 * @param {Number} timeout
-		 * 		Override default timeout setting for this specific load action.
-		 * 
-		 * @return {Object} mikado
-		 */
-		use: function(/* list MULTIPLE POSSIBLE, callback, timeout */) {
-			var list = Args(arguments), index = list.length, timeout, callback, undefined, lib = {}, domTool;
-			
-			var dependencyListener = function(path) {
-				var index = list.length;
-				while (index--) {
-					if (list[index] === path) {
-						list.splice(index, 1);
-					}
-				}
-				lib[library[path].name] = library[path].module;
-				domTool = domTool || library[path].domTool || library[path].hasDomTool;
-				if (!list.length) {
-					loadDispatcher.remove(path, dependencyListener);
-					if (callback && (!domTool || domLoaded)) {
-						callback(lib);
-					} else if (callback && !domLoaded) {
-						domReady(function() {
-							callback(lib);
-						});
-					}
-				}
-			}
-			
-			while (index--) {
-				if (typeof list[index] == "string") {
-					loadDependency(list[index]);
-					loadDispatcher.add(list[index], dependencyListener);
-					continue;
-				}
-				if (!isNaN(list[index]) && timeout === undefined) {
-					timeout = list.splice(index, 1)[0];
-				} else if (list[index] instanceof Function && !callback) {
-					callback = list.splice(index, 1)[0];
-				} else {
-					list.splice(index, 1);
-				}
-			}
-			
-			return this;
-		},
-		
-		/**Checks if module is loaded and available.
-		 * 
-		 * @param {String} path
-		 *	    Path of module.
-         *
-         * @return {Boolean}
-         */
-        available: function(path) {
-            return !!library[path];
+        ROOT = CONTEXT.documentElement,
+        
+        config = {
+            
+            // default time in miliseconds a module is allowed to take for loading.
+            timeout: 1500,
+            
+            // default folder repository to attach module paths to.
+            root:function() {
+                var list = CONTEXT.getElementsByTagName("script"),
+                    i = 0,
+                    re = /\/mikado[^\/\\]*\.js.?$/i,
+                    node;
+                while((node = list[i++])) {
+                    if(re.test(node.src)) {
+                        return node.src.replace(re, "");
+                    }
+                }
+            }(),
+            
+            // to put script elements in.
+            scriptLocation: CONTEXT.getElementsByTagName("head")[0],
+            
+            // external repository token map
+            repositories: {},
+            
+            // path override map
+            force: {}
         },
         
-        /**Adds a load listener for given path.
-         * 
-         * @param {String} path
-         * @param {Function} listener
-         */
-        addLoadListener: function(path, listener) {
-            loadDispatcher.add(path, function() {
-                listener();
-                loadDispatcher.remove(path, listener);
-            });
-            return this;
-        },
+        // stores active script elements.
+        scripts = {},
         
-        /**Removes a load listener for given path, if listener is still registered.
-         * 
-         * @param {String} path
-         * @param {Function} listener
-         */
-        removeLoadListener: function(path, listener) {
-            loadDispatcher.remove(path, listener);
-            return this;
-        },
+        // stores pending records relative to loading modules.
+        pending = {},
         
-        /**Changes mikado internal settings.
-         * 
-         * @param {Object} params
-         *      Following settings are mutable:
-         *      setting            type                           description
-         *      +---------------+----------+------------------------------------------+
-         *      | timeout        | Number   | Number of milliseconds allowed for any  |
-         *      |               |          | single module to load. When a module     |
-         *      |               |          | times out, it will fail silently, but    |
-         *      |               |          | leaves the script tag intact with a      |
-         *      |               |          | message in it's type attribute           |
-         *      +---------------+----------+------------------------------------------+
-         *      | root           | String   | Relative or absolute path to mikado.js  |
-         *      |               |          | location. Mikado tries to set this       |
-         *      |               |          | automatically, but setting it directly   |
-         *      |               |          | can be more robust and failsafe.         |
-         *      +---------------+----------+------------------------------------------+
-         *      | scriptLocation| Element  | Relative or absolute path to mikado.js   |
-         *      |               |          | location. Mikado tries to set this       |
-         *      |               |          | automatically, but setting it directly   |
-         *      |               |          | can be more robust and failsafe.         |
-         *      +---------------+----------+------------------------------------------+
-         *      | repositories  | Object   | A hash table (object) where keys signify |
-         *      |               |          | tokens to be used as a means to super-   |
-         *      |               |          | impose another URI to a module path and  |
-         *      |               |          | values as the actual URL.                |
-         *      |               |          | To load a module from a repository,      |
-         *      |               |          | prefix the module path with [token]:     |
-         *      |               |          | so a path looks like:                    |
-         *      |               |          |       "org:widgets.lists.Accordion"      |
-         *      |               |          | and the repository setting looks like:   |
-         *      |               |          |       {org:"http://someurl.org/js/"}     |
-         *      |               |          | !!USE WITH EXTREME CAUTION!!             |
-         *      +---------------+----------+------------------------------------------+
-         */
-        settings: function(params) {
-            for (var key in params) {
-                if (/(?:repositories|force)/.test(key)) {
-                    for (var repo in params[key]) {
-                        if (typeof params[key][repo] == "string") {
-                            settings[key][repo] = params[key][repo];
+        // stores timeout killers
+        killers = {},
+        
+        // used to create script elements for module loading.
+        scriptFragment = CONTEXT.createElement("script");
+        scriptFragment.type = "text/javascript";
+        
+        // used to instantiate modules.
+        var empty = function(){},
+        
+        /*---------------------------------------------------------------*
+         *                           utility                             *
+         *---------------------------------------------------------------*/
+        
+        // no explanation needed to JS devs.
+        slice = Array.prototype.slice,
+        
+        // Internal abstract EventDispatcher factory method.
+        createDispatcher = function() {
+            var listeners = {};
+            return {
+                add: function(type, listener) {
+                    if (!listeners[type]) {
+                        listeners[type] = [];
+                    }
+                    listeners[type].unshift(listener);
+                },
+                remove: function(type, listener) {
+                    var list = listeners[type], i;
+                    if (list) {
+                        i = list.length;
+                        while (i--) {
+                            if (list[i] === listener) {
+                                list.splice(i, 1);
+                            }
                         }
                     }
-                } else if (settings[key]) {
-                    settings[key] = params[key];
+                },
+                clear: function(type) {
+                    if(type && listeners[type]) {
+                        delete listeners[type];
+                    }
+                },
+                dispatch: function(type){
+                    console.log("dispatching event -> "+type)
+                    var list = listeners[type], i;
+                    if (list) {
+                        i = list.length;
+                        while (i--) {
+                            list[i](type);
+                        }
+                    }
                 }
             }
-            return this;
-        }
-    };
-    
-    return api;
-    
-};
-mikado = mikado();
+        },
+        
+        // polls document.body to see if it's done rendering elements.
+        // notifies listeners when the beast is ready.
+        // This works, works well and I prefer simplicity over code forking.
+        // might be off by ~25 miliseconds from other domReady implementations /shrug.
+        domReady = (function() {
+            var dispatcher = createDispatcher();
+            var poll = function(el){ 
+                    if (el && !el.nextSibling) {
+                        CONTEXT.body.removeChild(el);
+                        domLoaded = 1;
+                        dispatcher.dispatch("domReady");
+                        return (dispatcher = el = null);
+                    } else if (el) {
+                        CONTEXT.body.removeChild(el);
+                        el = null;
+                    } else if (CONTEXT.body) {
+                        el = CONTEXT.body.appendChild(CONTEXT.createElement("span"));
+                    }
+                    setTimeout(function() {
+                        poll(el);
+                    });
+                }
+            poll();
+            return function(listener) {
+                if (!domLoaded) {
+                    dispatcher.add("domReady", listener);
+                } else {
+                    listener();
+                }
+            }
+        })(),
+
+        /*---------------------------------------------------------------*
+         *                      loading mechanism                        *
+         *---------------------------------------------------------------*/
+        loadDispatcher = createDispatcher(),
+        
+        /**Creates a proper URI from the dot notated path.
+         * 
+         * @param {String} path Dot notated path to the module, relative to mikado root or repository
+         * @return {String} URI to module file.
+         */
+        createURI = function(path) {	
+			if (/^.*:/.test(path)) {
+				var repositoryName = path.replace(/:.*$/, ""),
+					repository = config.repositories[repositoryName];
+				if (!repository) {
+					throw "Error @ mikado->internal 'createFullPath' : No repository set for '" + repositoryName + ":'";
+				}
+                path = path.replace(/^.*:/, "").replace(/\./g, "/") + ".js";
+				return repository + path;
+			}
+			else {
+				return config.root + "/" + path.replace(/\./g, "/") + ".js";
+			}
+        },
+        
+        /**Loads all dependencies defined in the module record.
+         * 
+         * @param {Object} record Module data and builder method.
+         * @return {Boolean} true when there where dependencies that needed to be loaded.
+         */
+        loadDependencies = function(record){
+            if(!record.fetch || !record.fetch.length){
+                return false;
+            }
+            var list = record.fetch;
+            record.dependencyTracker = function(path){
+                var i = list.length;
+                while(i--) {
+                    if(list[i] === path) {
+                        list.splice(i, 1);
+                    }
+                }
+                if(!list.length) {
+                    storeRecord(record);
+                    loadDispatcher.remove(path, record.dependencyTracker);
+                    delete record.dependencyTracker;
+                }
+            }
+            var i = list.length, path;
+            while(i--) {
+                path = list[i];
+                if(registry[path]){
+                    list.splice(i, 1);
+                    continue;
+                }
+                loadDispatcher.add(path, record.dependencyTracker);
+                if (!pending[path]) {
+                    loadDependency(path, record.timeout);
+                }
+                pending[path].push(record);
+            }
+            return true;
+        },
+        
+        /**Appends a script tag to the scriptLocation with the URI to the module.
+         * - calls startKiller()
+         * - creates pending[path] registry
+         * 
+         * @param {String} path Dot notated path to the module, relative to mikado root or repository
+         * @param {Number} timeout Timeout override in miliseconds
+         * @return {Boolean} true if dependency is appended, false if dependency is already present.
+         */
+        loadDependency = function(path, timeout) {
+            if(registry[path]) {
+                return false;
+            }
+            if(!pending[path]) {
+                pending[path] = [];
+            }
+            scripts[path] = scriptFragment.cloneNode(false);
+            scripts[path].src = createURI(path);
+            config.scriptLocation.appendChild(scripts[path]);
+            startKiller(path, timeout);
+            return true;
+        },
+        
+        /*---------------------------------------------------------------*
+         *                      killing mechanism                        *
+         *---------------------------------------------------------------*/
+        
+        /**Recursively cleans up trail a timedout module leaves behind.
+         * 
+         * @param {String} path Dot notated path to the module, relative to mikado root or repository
+         * @param {String} message Error message, will be appended to script element in type attribute.
+         * @return {void}
+         */
+        kill = function(path, message){
+            var prefix = message ? "DEPENDENCY " : "";
+            message = message || "TIMED OUT ["+path+"] @ "+killers[path].timeout+"ms";
+            scripts[path].type = prefix + message;
+            var list = pending[path], i = 
+                list.length;
+            loadDispatcher.clear(path);
+            while(i--) {
+                kill(list[i].path, message);
+                delete list[i];
+            }
+            delete pending[path];
+        },
+        
+        /**Initializes a timeout procedure, calling kill() when timeout is achieved.
+         * 
+         * @param {String} path Dot notated path to the module, relative to mikado root or repository
+         * @param {Number} timeout Timeout override in miliseconds
+         * @return {Boolean} false if timeout mechanism is disabled through config.timeout
+         */
+        startKiller = function(path, timeout){
+            if(!config.timeout) {
+                return false;
+            }
+            timeout = timeout ? Math.max(timeout, config.timeout) : config.timeout;
+            killers[path] = {
+                timeout: timeout,
+                timeoutID: setTimeout(function(){
+                    kill(path);
+                }, timeout)
+            };
+            
+            return true;
+        },
+        
+        /**Shuts down the timeout procedure.
+         * 
+         * @param {String} path Dot notated path to the module, relative to mikado root or repository
+         * @return {void}
+         */
+        stopKiller = function(path){
+            clearInterval(killers[path].timeoutID);
+        },
+        
+        /*---------------------------------------------------------------*
+         *                       record mechanism                        *
+         *---------------------------------------------------------------*/
+        
+        /**Filters the module name from dot notated path.
+         * 
+         * @param {String} path Dot notated path to the module, relative to mikado root or repository
+         * @return {String} name of the module.
+         */
+        getNameFromPath = function(path){
+            return path ? path.split(".").pop() : null;
+        },
+        
+        /**Checks dependencies on module name and forces relative set module paths
+         * defined in config.force map.
+         * 
+         * @param {Array} list List of module paths (dot notated)
+         * @return {void}
+         */
+        enforce = function(list) {
+            var i = list.length, name;
+            while(i--) {
+                name = getNameFromPath(list[i]);
+                if(name && config.force[name]) {
+                    list[i] = config.force[name];
+                }
+            }
+        },
+        
+        /**Concatenates record.fetch and record.include arrays to be used for
+         * dependency loading.
+         * 
+         * @param {Object} record Module data and builder method.
+         * @return {void}
+         */
+        setRequired = function(record){
+            record.fetch = record.fetch || [];
+            if(record.include instanceof Array) {
+                record.fetch = record.fetch.concat(record.include);
+            }
+            enforce(record.fetch);
+        },
+        
+        /**Reformats allowed array to object map.
+         * 
+         * @param {Object} record
+         * @return {void}
+         */
+        setAllowed = function(record){
+            if(record.allow instanceof Array) {
+                var list = record.allow, path;
+                record.allow = {};
+                while((path = list.pop())) {
+                    record.allow[path] = true;
+                }
+            }
+        },
+        
+        /**Builds library object containing 'include' dependency modules.
+         * 
+         * @param {Object} targetRecord
+         * @return {void}
+         */
+        setLibraries = function(targetRecord) {
+            console.log(targetRecord)
+            var list = targetRecord.include,
+                i = list.length,
+                client = targetRecord.path,
+                record, path;
+            targetRecord.library = {};
+            while(i--) {
+                path = list[i];
+                record = registry[path];
+                if(record.allow && !record.allow[client]) {
+                    targetRecord.library[record.name] = "Access denied!";
+                    continue;
+                }
+                targetRecord.hasDomTool = targetRecord.hasDomTool || record.domTool || record.hasDomTool || false;
+                if (record.module) {
+                    targetRecord.library[record.name] = record.module;
+                }
+            }
+        },
+        
+        /**A bit of foolproofing, in case the path in the module is malformed or incorrect.
+         * Checks with 'pending' map on module name.
+         * 
+         * @param {Object} record
+         * @exception {String} Resolve error
+         * @return {void}
+         */
+        resolvePath = function(record){
+            var name = record.name || getNameFromPath(record.path),
+                path = record.path || name;
+            if(pending[path]) {
+                return;
+            }
+            var candidates = [], key;
+            for(key in pending) {
+                if(name == getNameFromPath(key)){
+                    candidates.push(key);
+                }
+            }
+            if(candidates.length === 1) {
+                record.path = candidates[0];
+            } else {
+                throw "ERROR: could not resolve incorrect path: '"+path+"'";
+            }
+        },
+        
+        /**Reformats record for convenience and starts dependency loading if required.
+         * Disables the killer mechanism for this specific record.
+         * When there are no dependencies, storeRecord() is called right away.
+         * 
+         * @param {Object} record
+         * @return {void}
+         */
+        processRecord = function(record){
+            resolvePath(record);
+            stopKiller(record.path);
+            record.name = record.name || getNameFromPath(record.path);
+            setAllowed(record);
+            setRequired(record);
+            if(!loadDependencies(record)) {
+                storeRecord(record);
+            }
+        },
+        
+        /**Builds the final record or delays building till DOM is ready depending on record.domBuild setting.
+         * Notifies any module listeners that rely on current record.
+         * Cleans up trail.
+         * 
+         * @param {Object} record
+         * @return {void}
+         */
+        storeRecord = function(record){
+            if(record.domBuild && !domLoaded) {
+                domReady(function(){
+                    storeRecord(record);
+                });
+                return false;
+            }
+            if(record.include instanceof Array) {
+                setLibraries(record);
+            }
+            if(typeof record.build == "function") {
+                record.module = record.build(record.library);
+                delete record.build;
+            }
+            registry[record.path] = record;
+            loadDispatcher.dispatch(record.path);
+            cleanUp(record.path);
+        },
+        
+        /**Cleans up trail of module (path used as identifier)
+         * 
+         * @param {String} path
+         * @return {void}
+         */
+        cleanUp = function(path){
+            delete pending[path];
+            delete killers[path];
+            scripts[path].parentNode.removeChild(scripts[path]);
+            delete scripts[path];
+        },
+        
+        /**Instantiates module if module is a function.
+         * Checks first if module has domTool dependencies, if so;
+         * relays instaniate procedure to domReady event.
+         * 
+         * @param {Object} record
+         * @param {Array} args
+         */
+        instantiate = function(record, args) {
+    		if (record.hasDomTool && !domLoaded) {
+    			return domReady(function() {
+    				instantiate(record, args);
+    			});
+    		}
+            var module = record.module;
+    		if (typeof module == "function") {
+    			empty.prototype = module.prototype;
+    			var instance = new empty();
+    			module.apply(instance, args);
+    		}
+        },
+        
+        /*---------------------------------------------------------------*
+         *                       final mikado API                        *
+         *---------------------------------------------------------------*/
+        
+        api = {
+            /**Add a module schema to mikado registry, following 'record' settings are possible:
+             * 
+             * REQUIRED:
+             * - path        Dot notated path to module file, relative to mikado root or repository config.
+             * - build       Builder method, return result will become the module.
+             * 
+             * OPTIONAL:
+             * - domTool     Set to true if module relies on DOM ready event to be USED.
+             * - domBuild    Set to true if module required DOM to be ready to BUILD.
+             * - name        Name of module, will be parsed from path otherwise.
+             * - include     Dot notated paths to other modules the current module requires.
+             * - fetch       Dot notated paths to other modules the current module does NOT require,
+             *               fetch can be used to force paralel loading of modules used by include dependencies.
+             * - allow       A list of dot notated paths of modules that are allowed to use current module.
+             *               If a module loads a disallowed submodule, that module will not be made available.
+             * 
+             * @param {Object} record see above
+             * @return {void}
+             */
+            module: function(record) {
+    			processRecord(record);
+    		},
+            
+            /**Creates an instance of the module, loads module if not already present in registry.
+             * Any extra arguments will be passed to the module constructor.
+             * Will NOT instantiate module if the module is not a function.
+             * Will relay instantiation if module requires DOM to be ready due to having 'domTool' setting set to true.
+             * 
+             * @param {Object} path Dot notated path to module file relative to mikado root or repository.
+             * @param {Object} arguments Multiple possible, any argument the module might require.
+             * @return {Object} mikado
+             */
+            run: function(path /*, arguments*/) {
+    			var args = slice.call(arguments, 1), 
+                    record = registry[path];
+    			if (!record) {
+    				loadDispatcher.add(path, function(path) {
+    					instantiate(registry[path], args);
+    				});
+    				loadDependency(path);
+    			} else {
+    				instantiate(record, args);
+    			}
+    			return this;
+    		},
+            
+            /**Loads modules defined in list and overrides timeout if set.
+             * Cannot disable timeout mechanism, use config to disable timeout mechanism.
+             * 
+             * @param {Array} list Array with dot notated paths to modules for loading.
+             * @param {Number} timeout Time module can take to load in miliseconds.
+             * @return {Object} mikado
+             */
+            fetch: function(list, timeout) {
+    			if(list instanceof Array) {
+    				var i = list.length;
+    				while(i--) {
+    					loadDependency(list[i], timeout);
+    				}
+    			}
+    			return this;
+    		},
+            
+            /**Checks if module is present and thus loaded in registry.
+             * 
+             * @param {Object} path Dot notated path to module file relative to mikado root or repository.
+             * @return {Boolean} true if the module is present in registry.
+             */
+            available: function(path) {
+                return !!registry[path];
+            },
+            
+            /**Setter method for mikado config.
+             * - root                URI of module root folder, defaults to mikado root folder.
+             * - scriptLocation      DOM element to which script elements are added to load modules.
+             * - timeout             Main timeout for module loading in miliseconds, 
+             *                       set to 0 to disable timeout mechanism. defaults to 1500 ms.
+             * - force               Force any path that leads to module name to a default path.
+             *                       For example: force : {"Selector":"some.Selector"} will
+             *                       force any other path that leads to a Selector module to 
+             *                       "some.Selector".
+             * - repositories        Maps tokens to other URI's for example:
+             *                       repositories : {"yui":"http://yuisite.com/modules/"}
+             *                       forces all modules with "yui:" prefix to be loaded from defined url.
+             * 
+             * 
+             * @param {Object} params
+             */
+            config: function(params) {
+                for (var key in params) {
+                    if (/(?:repositories|force)/.test(key)) {
+                        for (var name in params[key]) {
+                            if (typeof params[key][name] == "string") {
+                                config[key][name] = params[key][name];
+                            }
+                        }
+                    } else if (config[key]) {
+                        config[key] = params[key];
+                    }
+                }
+                return this;
+            }
+            
+        };
+        
+   // unleash mikado
+   GLOBAL.mikado =  api;
+
+})();
