@@ -25,6 +25,7 @@ mikado.module({
         
         var W3C_MODEL = !!(ROOT.addEventListener && ROOT.removeEventListener);
         var IE_MODEL = !!(ROOT.attachEvent && ROOT.detachEvent);
+        var UID = 0;
         
         var undefined;
         
@@ -39,14 +40,21 @@ mikado.module({
          * to lookup event/listener combinations in the registry instead
          * of passing dom elements through functions.
          */
-        var registry = [null];
+        var registry = {};
+        var ids = [];
         
         /* Helper method to retreive the registry ID from an element
          * and populate the registry in advance with an empty object
          * in case the element registry ID is not present in the registry.
          */
         var getID = function(element) {
-            return element[ERA] || (element[ERA] = registry.push({__listenerLength__:0}) - 1);
+            var id = element[ERA];
+            if(!id) {
+                element[ERA] = id = UID++;
+                registry[id] = {__listenerLength__:0};
+                ids.push(id);
+            }
+            return (element = id);
         }
         
         /**Registers a specific event/listener combination.
@@ -306,9 +314,9 @@ mikado.module({
         
         // same for all
         var clearAllListeners = function(element) {
-            var cache, index = registry.length, current;
+            var cache, index = ids.length, current;
             while (index--) {
-                current = registry[index];
+                current = registry[ids[index]];
                 for (var type in current) {
                     clearEventListeners(element, type);
                 }
