@@ -47,12 +47,12 @@ mikado.module({
 		var query = lib.Selector.select;
 		
 		/* generic method to be used through the final returned closure */
-		function sortNumber(a,b) {
+		var sortNumber = function(a,b) {
 			return a - b;
 		}
 		
 		/* generic method to be used through the final returned closure */
-		function process(list) {
+		var process = function(list) {
 			var current;
 			while(current = list.shift()) {
 				var result = query(current.cssExpression);
@@ -63,7 +63,7 @@ mikado.module({
 		}
 		
 		/* generic method to be used through the final returned closure */
-		function processResult(nodeList, manifest) {
+		var processResult = function(nodeList, manifest) {
 			var node;
 			while(node = nodeList.shift()) {
 				mikado.run.apply(null, [manifest.path, node].concat(manifest.args));
@@ -72,7 +72,7 @@ mikado.module({
 		}
 		
 		/* final closure, will be returned as module */
-		function Bootstrap(map) {
+		var Bootstrap = function(map) {
 			var priorities = [];
 			var finalMap = {0:[]};
 			var current, last;

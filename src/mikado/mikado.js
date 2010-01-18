@@ -16,7 +16,10 @@ var mikado = function() {
 		timeout: 1500,
 		
 		root: (function() {
-			var scripts = document.getElementsByTagName("script"), re = /\/mikado[^\/\\]*\.js.?$/i, i = scripts.length, src;
+			var scripts = document.getElementsByTagName("script");
+			var re = /\/mikado[^\/\\]*\.js.?$/i;
+			var i = scripts.length;
+			var src;
 			while (i--) {
 				src = scripts[i].src;
 				if (re.test(src)) {
@@ -62,7 +65,7 @@ var mikado = function() {
 	})(1, 2);
 	
 	
-	function EventDispatcher() {
+	var EventDispatcher = function() {
 		var listeners = {};
 		return {
 			add: function(event, listener) {
@@ -90,9 +93,10 @@ var mikado = function() {
 				}
 			},
 			dispatch: function(event, listener) {
-				var list = listeners[event], index, length;
+				var list = listeners[event];
 				if (list) {
-					for (index = 0, length = list.length; index < length; index++) {
+                    var index = list.length
+					while (index--) {
 						list[index](event);
 					}
 				}
@@ -132,15 +136,15 @@ var mikado = function() {
 	var pending = {};
 	var loadDispatcher = EventDispatcher();
 	
-	function loadDependencies(record) {
+	var loadDependencies = function(record) {
 		
-		if (!record.fetch) {
+        if (!record.fetch) {
 			return;
 		}
 		var list = record.fetch, path, script;
 		
 		record.dependencyListener = function(path) {
-			var index = list.length;
+            var index = list.length;
 			while (index--) {
 				if (list[index] === path) {
 					list.splice(index, 1);
@@ -169,7 +173,7 @@ var mikado = function() {
 		}
 	}
 	
-	function loadDependency(path, timeout) {
+	var loadDependency = function(path, timeout) {
 		if (!pending[path]) {
 			pending[path] = [];
 		}
@@ -181,7 +185,7 @@ var mikado = function() {
 	
 	var killers = {};
 	
-	function startKiller(path, timeout) {
+	var startKiller = function(path, timeout) {
 		// shutdown timeout mechanism when setting.timeout is set to 0 or fals(y).
 		if(!settings.timeout) {
 			return;
@@ -191,33 +195,34 @@ var mikado = function() {
 			timeout: timeout,
 			timeoutId: setTimeout(function(){
 				delete pending[path];
-				scripts[path].type = "TIMED OUT ['" + path + "'] @ " + timeout + "ms";
+                if(scripts[path])
+				    scripts[path].type = "TIMED OUT ['" + path + "'] @ " + timeout + "ms";
 			}, timeout)
 		}
 	}
 	
-	function stopKiller(path) {
+	var stopKiller = function(path) {
 		if (killers[path] && settings.timeout) {
-			clearTimeout(killers[path].timeoutId);
+			clearInterval(killers[path].timeoutId);
 		}
 	}
 	
-	function killerToDomReady(path) {
+	var killerToDomReady = function(path) {
 		if(!settings.timeout) {
 			return;
 		}
 		stopKiller(path);
 		var killer = killers[path];
 		domReady(function(){
-			startKiller(path, killer.node, killer.timeout);
+            startKiller(path, killer.timeout);
 		});
-		var index = pending[path].length;
-		while(i--) {
-			killerToDomReady(pending[path][index].path);
-		}
+        var index = pending[path].length;
+        while (index--) {
+            killerToDomReady(pending[path][index].path);
+        }
 	}
 	
-	function enforce(list) {
+	var enforce = function(list) {
 		var i = 0, len = list.length, path, name;
 		for (i; i < len; i++) {
 			path = list[i];
@@ -229,11 +234,11 @@ var mikado = function() {
 		return list;
 	}
 	
-	function getNameFromPath(path) {
+	var getNameFromPath = function(path) {
 		return path ? path.split(".").pop() : "";
 	}
 	
-	function createFullPath(path) {
+	var createFullPath = function(path) {
 		if (/^.*:/.test(path)) {
 			var repositoryName = path.replace(/:.*$/, "");
 			var repository = settings.repositories[repositoryName];
@@ -248,7 +253,7 @@ var mikado = function() {
 		}
 	}
 	
-	function setRequired(record) {
+	var setRequired = function(record) {
 		record.fetch = record.fetch || [];
 		if (record.include instanceof Array) {
 			record.fetch = record.fetch.concat(record.include);
@@ -256,17 +261,18 @@ var mikado = function() {
 		enforce(record.fetch);
 	}
 	
-	function reformatAllowed(record) {
+	var reformatAllowed = function(record) {
 		if (record.allow instanceof Array) {
-			var c, list = record.allow;
+			var c = list.pop(), list = record.allow;
 			record.allow = {};
-			while (c = list.pop()) {
+			while (c) {
 				record.allow[c] = true;
+				c = list.pop();
 			}
 		}
 	}
 	
-	function setLibs(targetRecord) {
+	var setLibs = function(targetRecord) {
 		var list = targetRecord.include, index = list.length, record, path, client = targetRecord.path;
 		targetRecord.lib = {};
 		
@@ -282,7 +288,7 @@ var mikado = function() {
 		}
 	}
 	
-	function resolvePath(record) {
+	var resolvePath = function(record) {
 		
 		var name = record.name || getNameFromPath(record.path);
 		var path = record.path || name;
@@ -306,23 +312,24 @@ var mikado = function() {
 		}
 	}
 	
-	function processRecord(record) {
+	var processRecord = function(record) {
 		
-		resolvePath(record);
+        resolvePath(record);
+        
 		record.name = getNameFromPath(record.path);
 		reformatAllowed(record);
 		setRequired(record);
 		loadDependencies(record);
-		
-		if (!record.fetch.length) {
+        
+        if (!record.fetch.length) {
 			storeRecord(record);
 		}
 	}
 	
-	function storeRecord(record) {
-		
-		if (record.domBuild && !domLoaded) {
-			killerToDomReady(killerToDomReady(record.path));
+	var storeRecord = function(record) {
+        
+        if (record.domBuild && !domLoaded) {
+			killerToDomReady(record.path);
 			return domReady(function() {
 				storeRecord(record);
 			});
@@ -335,14 +342,14 @@ var mikado = function() {
 		record.module = record.build(record.lib);
 		library[record.path] = record;
 		
-		// clean up
-		cleanUp(record.path);
-		
 		// notify listeners.
 		loadDispatcher.dispatch(record.path);
+        
+        // clean up
+		cleanUp(record.path);
 	}
 	
-	function cleanUp(path) {
+	var cleanUp = function(path) {
 		delete pending[path];
 		stopKiller(path);
 		delete killers[path];
@@ -350,10 +357,10 @@ var mikado = function() {
 		delete scripts[path];
 	}
 	
-	function empty() {
+	var empty = function() {
 	}
 	
-	function instantiate(record, args) {
+	var instantiate = function(record, args) {
 		var module = record.module;
 		
 		if (record.hasDomTool && !domLoaded) {
@@ -517,58 +524,92 @@ var mikado = function() {
 			return this;
 		},
 		
-		/**Changes mikado internal settings.
+		/**Checks if module is loaded and available.
 		 * 
-		 * @param {Object} params
-		 *      Following settings are mutable:
-		 *      setting		    type	                       description
-		 *      +---------------+----------+------------------------------------------+
-		 * 	    | timeout		| Number   | Number of milliseconds allowed for any   |
-		 * 	    |               |          | single module to load. When a module     |
-		 * 	    |               |          | times out, it will fail silently, but    |
-		 * 	    |               |          | leaves the script tag intact with a      |
-		 * 	    |               |          | message in it's type attribute           |
-		 * 	    +---------------+----------+------------------------------------------+
-		 * 	    | root   		| String   | Relative or absolute path to mikado.js   |
-		 * 	    |               |          | location. Mikado tries to set this       |
-		 * 	    |               |          | automatically, but setting it directly   |
-		 * 	    |               |          | can be more robust and failsafe.         |
-		 * 	    +---------------+----------+------------------------------------------+
-		 * 	    | scriptLocation| Element  | Relative or absolute path to mikado.js   |
-		 * 	    |               |          | location. Mikado tries to set this       |
-		 * 	    |               |          | automatically, but setting it directly   |
-		 * 	    |               |          | can be more robust and failsafe.         |
-		 * 	    +---------------+----------+------------------------------------------+
-		 * 	    | repositories  | Object   | A hash table (object) where keys signify |
-		 * 	    |               |          | tokens to be used as a means to super-   |
-		 * 	    |               |          | impose another URI to a module path and  |
-		 * 	    |               |          | values as the actual URL.				  |
-		 * 	    |               |          | To load a module from a repository,      |
-		 * 	    |               |          | prefix the module path with [token]:     |
-		 * 	    |               |          | so a path looks like:   				  |
-		 * 	    |               |          |       "org:widgets.lists.Accordion"	  |
-		 * 	    |               |          | and the repository setting looks like:	  |
-		 * 	    |               |          |       {org:"http://someurl.org/js/"}     |
-		 * 	    |               |          | !!USE WITH EXTREME CAUTION!!		      |
-		 * 	    +---------------+----------+------------------------------------------+
-		 */
-		settings: function(params) {
-			for (var key in params) {
-				if (/(?:repositories|force)/.test(key)) {
-					for (var repo in params[key]) {
-						if (typeof params[key][repo] == "string") {
-							settings[key][repo] = params[key][repo];
-						}
-					}
-				} else if (settings[key]) {
-					settings[key] = params[key];
-				}
-			}
-			return this;
-		}
-	};
-	
-	return api;
-	
+		 * @param {String} path
+		 *	    Path of module.
+         *
+         * @return {Boolean}
+         */
+        available: function(path) {
+            return !!library[path];
+        },
+        
+        /**Adds a load listener for given path.
+         * 
+         * @param {String} path
+         * @param {Function} listener
+         */
+        addLoadListener: function(path, listener) {
+            loadDispatcher.add(path, function() {
+                listener();
+                loadDispatcher.remove(path, listener);
+            });
+            return this;
+        },
+        
+        /**Removes a load listener for given path, if listener is still registered.
+         * 
+         * @param {String} path
+         * @param {Function} listener
+         */
+        removeLoadListener: function(path, listener) {
+            loadDispatcher.remove(path, listener);
+            return this;
+        },
+        
+        /**Changes mikado internal settings.
+         * 
+         * @param {Object} params
+         *      Following settings are mutable:
+         *      setting            type                           description
+         *      +---------------+----------+------------------------------------------+
+         *      | timeout        | Number   | Number of milliseconds allowed for any  |
+         *      |               |          | single module to load. When a module     |
+         *      |               |          | times out, it will fail silently, but    |
+         *      |               |          | leaves the script tag intact with a      |
+         *      |               |          | message in it's type attribute           |
+         *      +---------------+----------+------------------------------------------+
+         *      | root           | String   | Relative or absolute path to mikado.js  |
+         *      |               |          | location. Mikado tries to set this       |
+         *      |               |          | automatically, but setting it directly   |
+         *      |               |          | can be more robust and failsafe.         |
+         *      +---------------+----------+------------------------------------------+
+         *      | scriptLocation| Element  | Relative or absolute path to mikado.js   |
+         *      |               |          | location. Mikado tries to set this       |
+         *      |               |          | automatically, but setting it directly   |
+         *      |               |          | can be more robust and failsafe.         |
+         *      +---------------+----------+------------------------------------------+
+         *      | repositories  | Object   | A hash table (object) where keys signify |
+         *      |               |          | tokens to be used as a means to super-   |
+         *      |               |          | impose another URI to a module path and  |
+         *      |               |          | values as the actual URL.                |
+         *      |               |          | To load a module from a repository,      |
+         *      |               |          | prefix the module path with [token]:     |
+         *      |               |          | so a path looks like:                    |
+         *      |               |          |       "org:widgets.lists.Accordion"      |
+         *      |               |          | and the repository setting looks like:   |
+         *      |               |          |       {org:"http://someurl.org/js/"}     |
+         *      |               |          | !!USE WITH EXTREME CAUTION!!             |
+         *      +---------------+----------+------------------------------------------+
+         */
+        settings: function(params) {
+            for (var key in params) {
+                if (/(?:repositories|force)/.test(key)) {
+                    for (var repo in params[key]) {
+                        if (typeof params[key][repo] == "string") {
+                            settings[key][repo] = params[key][repo];
+                        }
+                    }
+                } else if (settings[key]) {
+                    settings[key] = params[key];
+                }
+            }
+            return this;
+        }
+    };
+    
+    return api;
+    
 };
 mikado = mikado();
