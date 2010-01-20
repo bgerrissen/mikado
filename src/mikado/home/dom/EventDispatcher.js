@@ -25,36 +25,49 @@ mikado.module({
         
         var W3C_MODEL = !!(ROOT.addEventListener && ROOT.removeEventListener);
         var IE_MODEL = !!(ROOT.attachEvent && ROOT.detachEvent);
-        var UID = 0;
+        var uid = 0;
         
         var undefined;
         
         /*-----------------------------------------------------------------*
          *                       EVENT REGISTRY                            *
          *-----------------------------------------------------------------*/
-        // Event Registry Attribute, for elements.
-        var ERA = "::EventRegistryID::";
-        
         /* A somewhat simpler event registry, based on Diego's more complex
          * registry. We're adding string ID's to elements and use those
          * to lookup event/listener combinations in the registry instead
          * of passing dom elements through functions.
          */
         var registry = {};
-        var ids = [];
+        var IDCache = {};
         
         /* Helper method to retreive the registry ID from an element
          * and populate the registry in advance with an empty object
          * in case the element registry ID is not present in the registry.
          */
-        var getID = function(element) {
-            var id = element[ERA];
-            if(!id) {
-                element[ERA] = id = UID++;
-                registry[id] = {__listenerLength__:0};
-                ids.push(id);
+        var getIDC = function(element) {
+            var type = element.nodeType, i, cache = IDCache[type];
+            if (!cache) {
+                cache = IDCache[type] = [];
+            } else {
+                i = cache.length;
+                while (i--) {
+                    if (element === cache[i].element) {
+                        return (element = cache[i]);
+                    }
+                }
             }
-            return (element = id);
+            // no cache for element, so we create one.
+            uid++;
+            i = cache.push({
+                element: element,
+                id: uid
+            }) - 1;
+            registry[uid] = {__listenerLength__:0};
+            return (element = cache[i]);
+        }
+        
+        var getID = function(element){
+            return getIDC(element).id;
         }
         
         /**Registers a specific event/listener combination.
@@ -129,7 +142,7 @@ mikado.module({
          *                     EVENT IMPLEMENTATION                        *
          *-----------------------------------------------------------------*/
         // reduced Diego's if/else expressions, results in more bytes for minute peformance.
-        // 
+        // easier for me to overview as well.
         if (W3C_MODEL) {
         
             // ----------------------------- W3C ---------------------------- //
@@ -155,14 +168,15 @@ mikado.module({
                 return event;
             }
             
-            var addListener = function(element, type, listener, capture) {
-                register(getID(element), type, listener, null, capture);
+            var addListener = function(element, id, type, listener, capture) {
+                register(id||getID(element), type, listener, null, capture);
                 element.addEventListener(type, listener, capture || false);
                 element = null;
             }
             
-            var removeListener = function(element, type, listener, capture) {
-                var id = getID(element), index = isRegistered(id, type, listener, capture);
+            var removeListener = function(element, id, type, listener, capture) {
+                id = id||getID(element);
+                var index = isRegistered(id, type, listener, capture);
                 if (index !== false) {
                     element.removeEventListener(type, listener, capture || false);
                     unregister(id, type, index);
@@ -170,8 +184,9 @@ mikado.module({
                 element = null;
             }
             
-            var clearListeners = function(element, type) {
-                var id = getID(element), index, current;
+            var clearListeners = function(element, id, type) {
+                id = id||getID(element);
+                var index, current;
                 var cache = registry[id] ? registry[id][type] : null;
                 if (cache) {
                     index = cache.length;
@@ -214,13 +229,13 @@ mikado.module({
                 return (element = fixEvent(element, event, capture));
             }
             
-            var fixListener = function(element, type, listener, capture) {
+            var fixListener = function(element, id, type, listener, capture) {
                 function wrapped(event) {
                     var element = arguments.callee.element;
                     listener.call(element, fixEvent(element, event, capture));
                 }
                 wrapped.element = element;
-                register(getID(element), type, listener, wrapped, capture);
+                register(id, type, listener, wrapped, capture);
                 return (element = wrapped);
             }
             
@@ -228,13 +243,14 @@ mikado.module({
             
                 // ----------------------------- IE ---------------------------- //
                 
-                var addListener = function(element, type, listener, capture) {
-                    element.attachEvent('on' + type, fixListener(element, type, listener, capture));
+                var addListener = function(element, id, type, listener, capture) {
+                    id = id||getID(element);
+                    element.attachEvent('on' + type, fixListener(element, id, type, listener, capture));
                     element = null;
                 }
                 
-                var removeListener = function(element, type, listener, capture) {
-                    var id = getID(element);
+                var removeListener = function(element, id, type, listener, capture) {
+                    id = id||getID(element);
                     var index = isRegistered(id, type, listener, capture);
                     if (index !== false) {
                         listener = registry[id][type][index].wrapped;
@@ -244,8 +260,9 @@ mikado.module({
                     element = null;
                 }
                 
-                var clearListeners = function(element, type) {
-                    var id = getID(element), index, current;
+                var clearListeners = function(element, id, type) {
+                    id = id||getID(element);
+                    var index, current;
                     var cache = registry[id] ? registry[id][type] : null;
                     if (cache) {
                         index = cache.length;
@@ -268,7 +285,7 @@ mikado.module({
                 
                 var eventHandler = function(event) {
                     event = event || window.event;
-                    var id = this[ERA], type = event.type;
+                    var id = getID(this), type = event.type;
                     var cache = registry[id] ? registry[id][type] : null;
                     if (cache) {
                         event = fixEvent(this, event);
@@ -278,20 +295,22 @@ mikado.module({
                     }
                 }
                 
-                var addListener = function(element, type, listener, capture) {
-                    fixListener(element, type, listener, capture);
+                var addListener = function(element, id, type, listener, capture) {
+                    id = id||getID(element);
+                    fixListener(element, id, type, listener, capture);
                     if (element['on' + type] && element['on' + type] !== eventHandler) {
-                        fixListener(element, type, element['on' + type], false);
+                        fixListener(element, id, type, element['on' + type], false);
                     }
                     element['on' + type] = eventHandler;
                 }
                 
-                var removeListener = function(element, type, listener, capture) {
-                    unregister(getID(element), type, listener, capture);
+                var removeListener = function(element, id, type, listener, capture) {
+                    unregister(id||getID(element), type, listener, capture);
                 }
                 
-                var clearListeners = function(element, type) {
-                    var id = getID(element), index, current;
+                var clearListeners = function(element, id, type) {
+                    id = id||getID(element);
+                    var index, current;
                     var cache = registry[id] ? registry[id][type] : null;
                     if (cache) {
                         index = cache.length;
@@ -313,12 +332,12 @@ mikado.module({
         }
         
         // same for all
-        var clearAllListeners = function(element) {
-            var cache, index = ids.length, current;
-            while (index--) {
-                current = registry[ids[index]];
-                for (var type in current) {
-                    clearEventListeners(element, type);
+        var clearAllListeners = function(element, id) {
+            id = id||getID(element);
+            var cache = registry[id], type;
+            if(cache) {
+                for(type in cache) {
+                   clearEventListeners(element, id, type); 
                 }
             }
             element = null;
@@ -491,32 +510,34 @@ mikado.module({
             }
             
             this._element = element;
+            this._eventRegistryID = getID(element);
             
             element = null;
         }
         
         EventDispatcher.prototype = {
             addEventListener: function(type, listener, capture) {
-                addEventListener(this._element, type, listener, capture);
+                addEventListener(this._element, this._eventRegistryID, type, listener, capture);
                 return this;
             },
             removeEventListener: function(type, listener, capture) {
-                removeEventListener(this._element, type, listener, capture);
+                removeEventListener(this._element, this._eventRegistryID, type, listener, capture);
                 return this;
             },
             dispatchEvent: function(event) {
                 return dispatchEvent(this._element, event);
             },
             clearEventListeners: function(event) {
-                clearEventListeners(this._element, event);
+                clearEventListeners(this._element, this._eventRegistryID, event);
                 return this;
             },
             clearAllEventListeners: function() {
-                clearAllEventListeners(this._element);
+                clearAllEventListeners(this._element, this._eventRegistryID);
                 return this;
             },
             listeners: function() {
-                return registry[getID(this._element)].__listenerLength__;
+                var id = this._eventRegistryID||getID(this._element);
+                return registry[id].__listenerLength__;
             }
         }
         
