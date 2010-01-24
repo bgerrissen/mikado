@@ -2,13 +2,14 @@ Mikado
 =====
 
 **** Casual Message ***
-Feel confident enough about mikado.js to signify RC1!! =)
+Moved on to RC2!
 Now... Still need to build a demo before actually releasing it..
 
 **** Version ****
-RC1
+RC2
 
 **** Version History ****
+24-1-2010 : RC2
 19-1-2010 : RC1
 
 **** Module (paralel) loader and alternate dependency resolver ****
