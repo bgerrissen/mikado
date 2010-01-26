@@ -1,16 +1,16 @@
 Mikado
 =====
 
-**** Casual Message ***
+**** Casual Message ****
 Moved on to RC2!
 Now... Still need to build a demo before actually releasing it..
 
 **** Version ****
-RC2
+*RC2
 
 **** Version History ****
-24-1-2010 : RC2
-19-1-2010 : RC1
+*24-1-2010 : RC2
+*19-1-2010 : RC1
 
 **** Module (paralel) loader and alternate dependency resolver ****
 

@@ -19,15 +19,51 @@ mikado.module({
         /*-----------------------------------------------------------------*
          *                          CONSTANTS                              *
          *-----------------------------------------------------------------*/
-        var WIN = window, DOC = WIN.document, ROOT = DOC.documentElement;
+        var WIN = window, CONTEXT = WIN.document, ROOT = CONTEXT.documentElement;
         
         var CAPTURING_PHASE = 1, AT_TARGET = 2, BUBBLING_PHASE = 3;
         
         var W3C_MODEL = !!(ROOT.addEventListener && ROOT.removeEventListener);
-        var IE_MODEL = !!(ROOT.attachEvent && ROOT.detachEvent);
+        var IE_MODEL = !!(ROOT.attachEvent && ROOT.detachEvent && !W3C_MODEL);
         var uid = 0;
         
+        var USE_DOM2 = true;
+        
         var undefined;
+        /*-----------------------------------------------------------------*
+         *                       UTILITY METHODS                           *
+         *-----------------------------------------------------------------*/
+        var getDocument = function(e) {
+            return e.ownerDocument || e.document || e;
+        }
+        
+        var getWindow;
+        
+        // bloated for clarity.
+        if ('parentWindow' in top.document) {
+            getWindow = function(context) {
+                return context.parentWindow || window;
+            }
+        } else if ('defaultView' in top.document && top === top.document.defaultView) {
+            getWindow = function(context) {
+                return context.defaultView || window;
+            }
+        } else {
+            getWindow = function(context) {
+                // fix for older Safari 2.0.x returning
+                // [object AbstractView] instead of [window]
+                if (window.frames.length === 0 && top.document === context) {
+                    return top;
+                } else {
+                    for (var i in top.frames) {
+                        if (top.frames[i].document === context) {
+                            return top.frames[i];
+                        }
+                    }
+                }
+                return top;
+            }
+        }
         
         /*-----------------------------------------------------------------*
          *                       EVENT REGISTRY                            *
@@ -40,9 +76,8 @@ mikado.module({
         var registry = {};
         var IDCache = {};
         
-        /* Helper method to retreive the registry ID from an element
-         * and populate the registry in advance with an empty object
-         * in case the element registry ID is not present in the registry.
+        /* Gets a cache tied to an element, if no cache, it creates one.
+         * No more expando's on elements and still id's are seperated from registry.
          */
         var getIDC = function(element) {
             var type = element.nodeType, i, cache = IDCache[type];
@@ -57,16 +92,17 @@ mikado.module({
                 }
             }
             // no cache for element, so we create one.
-            uid++;
             i = cache.push({
                 element: element,
-                id: uid
-            }) - 1;
-            registry[uid] = {__listenerLength__:0};
-            return (element = cache[i]);
+                id: ++uid
+            });
+            registry[uid] = {
+                __listenerLength__: 0
+            };
+            return (element = cache[i - 1]);
         }
         
-        var getID = function(element){
+        var getID = function(element) {
             return getIDC(element).id;
         }
         
@@ -129,7 +165,7 @@ mikado.module({
                 registry[id].__listenerLength__--;
             }
         }
-
+        
         var stopPropagation = function() {
             this.cancelBubble = true;
         }
@@ -143,40 +179,39 @@ mikado.module({
          *-----------------------------------------------------------------*/
         // reduced Diego's if/else expressions, results in more bytes for minute peformance.
         // easier for me to overview as well.
-        if (W3C_MODEL) {
-        
+        if (W3C_MODEL && USE_DOM2) {
             // ----------------------------- W3C ---------------------------- //
             
-            var createEvent = function(type) {
-                var event;
+            var createEvent = function(context, type) {
+                var event, win = getWindow(context);
                 if (/mouse|click/.test(type)) {
                     try {
-                        event = DOC.createEvent('MouseEvents');
-                        event.initMouseEvent(type, true, true, WIN, 0, 0, 0, 0, 0, false, false, false, false, 0, null);
+                        event = context.createEvent('MouseEvents');
+                        event.initMouseEvent(type, true, true, win, 0, 0, 0, 0, 0, false, false, false, false, 0, null);
                     } 
                     catch (e) {
-                        event = DOC.createEvent('HTMLEvents');
+                        event = context.createEvent('HTMLEvents');
                         event.initEvent(type, true, true);
                     }
                 } else if (/key(down|press|out)/.test(type)) {
-                    event = DOC.createEvent('KeyEvents');
-                    event.initKeyEvent(type, true, true, WIN, false, false, false, false, 0, 0);
+                    event = context.createEvent('KeyEvents');
+                    event.initKeyEvent(type, true, true, win, false, false, false, false, 0, 0);
                 } else {
-                    event = DOC.createEvent('HTMLEvents');
+                    event = context.createEvent('HTMLEvents');
                     event.initEvent(type, true, true);
                 }
-                return event;
+                return (context = win = event);
             }
             
             var addListener = function(element, id, type, listener, capture) {
-                register(id||getID(element), type, listener, null, capture);
+                register(id || getID(element), type, listener, null, capture || false);
                 element.addEventListener(type, listener, capture || false);
                 element = null;
             }
             
             var removeListener = function(element, id, type, listener, capture) {
-                id = id||getID(element);
-                var index = isRegistered(id, type, listener, capture);
+                id || (id = getID(element));
+                var index = isRegistered(id, type, listener, capture || false);
                 if (index !== false) {
                     element.removeEventListener(type, listener, capture || false);
                     unregister(id, type, index);
@@ -185,7 +220,7 @@ mikado.module({
             }
             
             var clearListeners = function(element, id, type) {
-                id = id||getID(element);
+                id || (id = getID(element));
                 var index, current;
                 var cache = registry[id] ? registry[id][type] : null;
                 if (cache) {
@@ -200,14 +235,14 @@ mikado.module({
             }
             
             var dispatch = function(element, type) {
-                return (element = element.dispatchEvent(createEvent(type)));
+                return (element = element.dispatchEvent(createEvent(getDocument(element), type)));
             }
             
         } else {
         
             // ----------------------------- legacy browsers ---------------------------- //
             var fixEvent = function(element, event, capture) {
-                event = event || window.event;
+                event || (event = getWindow(getDocument(element)).event);
                 event.currentTarget = element;
                 event.target = event.srcElement || element;
                 event.preventDefault = preventDefault;
@@ -219,7 +254,7 @@ mikado.module({
             }
             
             var createEvent = function(element, type, capture) {
-                var event = DOC.createEventObject();
+                var event = getDocument(element).createEventObject();
                 event.type = type;
                 event.target = element;
                 event.eventPhase = 0;
@@ -239,19 +274,19 @@ mikado.module({
                 return (element = wrapped);
             }
             
-            if (IE_MODEL) {
+            if (IE_MODEL && USE_DOM2) {
             
                 // ----------------------------- IE ---------------------------- //
                 
                 var addListener = function(element, id, type, listener, capture) {
-                    id = id||getID(element);
-                    element.attachEvent('on' + type, fixListener(element, id, type, listener, capture));
+                    id || (id = getID(element));
+                    element.attachEvent('on' + type, fixListener(element, id, type, listener, capture || false));
                     element = null;
                 }
                 
                 var removeListener = function(element, id, type, listener, capture) {
-                    id = id||getID(element);
-                    var index = isRegistered(id, type, listener, capture);
+                    id || (id = getID(element));
+                    var index = isRegistered(id, type, listener, capture || false);
                     if (index !== false) {
                         listener = registry[id][type][index].wrapped;
                         element.detachEvent('on' + type, listener);
@@ -261,7 +296,7 @@ mikado.module({
                 }
                 
                 var clearListeners = function(element, id, type) {
-                    id = id||getID(element);
+                    id || (id = getID(element));
                     var index, current;
                     var cache = registry[id] ? registry[id][type] : null;
                     if (cache) {
@@ -276,7 +311,7 @@ mikado.module({
                 }
                 
                 var dispatch = function(element, type, capture) {
-                    return element.fireEvent('on' + type, createEvent(element, type, capture));
+                    return element.fireEvent('on' + type, createEvent(element, type, capture || false));
                 }
                 
             } else {
@@ -296,7 +331,7 @@ mikado.module({
                 }
                 
                 var addListener = function(element, id, type, listener, capture) {
-                    id = id||getID(element);
+                    id || (id = getID(element));
                     fixListener(element, id, type, listener, capture);
                     if (element['on' + type] && element['on' + type] !== eventHandler) {
                         fixListener(element, id, type, element['on' + type], false);
@@ -305,11 +340,11 @@ mikado.module({
                 }
                 
                 var removeListener = function(element, id, type, listener, capture) {
-                    unregister(id||getID(element), type, listener, capture);
+                    unregister(id || getID(element), type, listener, capture);
                 }
                 
                 var clearListeners = function(element, id, type) {
-                    id = id||getID(element);
+                    id || (id = getID(element));
                     var index, current;
                     var cache = registry[id] ? registry[id][type] : null;
                     if (cache) {
@@ -326,18 +361,16 @@ mikado.module({
                         type: type
                     }, capture));
                 }
-                
             }
-            
         }
         
         // same for all
         var clearAllListeners = function(element, id) {
-            id = id||getID(element);
+            id || (id = getID(element));
             var cache = registry[id], type;
-            if(cache) {
-                for(type in cache) {
-                   clearEventListeners(element, id, type); 
+            if (cache) {
+                for (type in cache) {
+                    clearEventListeners(element, id, type);
                 }
             }
             element = null;
@@ -370,7 +403,6 @@ mikado.module({
                 var index = 0, length = cache.length, current;
                 for (index; index < length; index++) {
                     if (cache[index].capture === capturePhase) {
-                        // catch errors?
                         cache[index].listener.call(element, event);
                     }
                 }
@@ -383,7 +415,7 @@ mikado.module({
         
             var ancestors = [], node = this.parentNode, index;
             
-            if(self) {
+            if (self) {
                 event.eventPhase = AT_TARGET;
                 manualDispatch(this, event, true);
             }
@@ -405,12 +437,12 @@ mikado.module({
             index = 0;
             event.eventPhase = BUBBLING_PHASE;
             
-            while ((node = ancestors.shift())  && !event.cancelBubble) {
+            while ((node = ancestors.shift()) && !event.cancelBubble) {
                 event.currentTarget = node;
                 manualDispatch(node, event, false);
             }
             
-            if(self) {
+            if (self) {
                 event.eventPhase = AT_TARGET;
                 manualDispatch(this, event, false);
             }
@@ -423,36 +455,36 @@ mikado.module({
          *                                                                 *
          *    Feature test events live and store supported events!         *
          *-----------------------------------------------------------------*/
-        
         /* works in:
          * - FireFox 3.5.7
          * - Safari 4.0.4
          * - Opera 9.62
          * - IE 8 , 7
          * Need more browser tests!
-         * 
+         *
          * Attaches listener to document
          * dispatches event on document.documentElement
          * Removes listener from document
-         * 
+         *
          * We need this to determine if we need to use the Event Simulator
          * for custom events. I prefer to use native support when possible.
          */
         var supportedEvents = {};
-        
+        var contextID = getID(CONTEXT);
         var eventSupported = function(type) {
-            if(supportedEvents[type] !== undefined) {
+            if (supportedEvents[type] !== undefined) {
                 return supportedEvents[type];
             }
             var fn = function(e) {
                 supportedEvents[type] = e.type === type;
             }
             try {
-                addListener(DOC, type, fn, false);
+                addListener(CONTEXT, contextID, type, fn, false);
                 dispatch(ROOT, type);
-                removeListener(DOC, type, fn, false);
-            } catch(e) {
+            } 
+            catch (e) {
                 supportedEvents[type] = false;
+                removeListener(CONTEXT, contextID, type, fn, false);
             }
             return supportedEvents[type];
         }
@@ -463,8 +495,8 @@ mikado.module({
         var addEventListener = addListener;
         var removeEventListener = removeListener;
         
-        var dispatchEvent = function(element, type){
-            if(eventSupported(type)) {
+        var dispatchEvent = function(element, type) {
+            if (eventSupported(type)) {
                 dispatch(element, type);
             } else {
                 propagate.call(element, customEvent(element, type), true);
@@ -483,24 +515,30 @@ mikado.module({
          I suspect IE form elements are activeX abominations (which would explain a LOT).
          Ergo, they do not inherit from the document.documentElement, but have
          their own definitions.
+         
+         Just fixing onchange event for IE form elements for now.
          */
-        if (IE_MODEL) { // activeX fix?
-            
-            var activator = function(e) {
-                if (/select/i.test(e.target.tagName)) {
-                    addEventListener(e.target, "change", propagate, false);
-                    addEventListener(e.target, "beforedeactivate", deactivator, false);
+        if (IE_MODEL && USE_DOM2) {
+        
+            var activeElement;
+            var pushPropagate = function(e) {
+                if (activeElement) {
+                    propagate.call(activeElement, customEvent(activeElement, 'change', true), false);
+                    activeElement.detachEvent('onchange', pushPropagate);
+                    activeElement = null;
                 }
             }
             
-            var deactivator = function(e) {
-                removeEventListener(e.target, "change", propagate, false);
-            }
+            CONTEXT.attachEvent("onbeforeactivate", function(e) {
+                e || (e = WIN.event);
+                activeElement = e.target || e.srcElement;
+                var tag = activeElement.tagName;
+                if (/^(?:select|input|textarea)/i.test(tag)) {
+                    activeElement.attachEvent('onchange', pushPropagate);
+                }
+            });
             
-            addEventListener(DOC, "beforeactivate", activator, true);
         }
-        
-        
         
         // ----------------------------- The Class ---------------------------- //
         var EventDispatcher = function(element) {
@@ -536,7 +574,7 @@ mikado.module({
                 return this;
             },
             listeners: function() {
-                var id = this._eventRegistryID||getID(this._element);
+                var id = this._eventRegistryID || getID(this._element);
                 return registry[id].__listenerLength__;
             }
         }
@@ -545,9 +583,8 @@ mikado.module({
         
         // TODO:
         // enforce useCapture for IE. slower performance!
-        // EventDispatcher.useCaptureSupport = useCaptureSupport;
+        // EventDispatcher.enableIECapture = useCaptureSupport;
         
         return EventDispatcher;
     }
-    
 });
