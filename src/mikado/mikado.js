@@ -34,7 +34,7 @@
         
     var domLoaded = 0;
         
-    var GLOBAL = this, CONTEXT = GLOBAL.document;
+    var GLOBAL = this, CONTEXT = GLOBAL.document, ROOT = CONTEXT.documentElement;
         
     var TARGET = CONTEXT.getElementsByTagName("head")[0];
     
@@ -115,36 +115,69 @@
         dispatcher.dispatch(ERROR, data);
     }
         
-    // polls document.body to see if it's done rendering elements.
-    // notifies listeners when the beast is ready.
-    // This works, works well and I prefer simplicity over code forking.
-    // might be off by ~25 miliseconds from other domReady implementations /shrug.
-    var domReady = (function() {
-        var poll = function(el){ 
-                if (el && !el.nextSibling) {
-                    CONTEXT.body.removeChild(el);
-                    domLoaded = 1;
-                    dispatcher.dispatch(DOMREADY);
-                    return (el = null);
-                } else if (el) {
-                    CONTEXT.body.removeChild(el);
-                    el = null;
-                } else if (CONTEXT.body) {
-                    el = CONTEXT.body.appendChild(CONTEXT.createElement("span"));
+    var initDomReady = function(){
+        if(!domLoaded) {
+            domLoaded = 1;
+            dispatcher.dispatch(DOMREADY);
+        }
+    }
+    
+    // based on Diego Perini's work.
+    // http://javascript.nwbox.com/ContentLoaded/ +
+    // http://javascript.nwbox.com/IEContentLoaded/
+    if(CONTEXT.addEventListener) {
+        var W3CContentLoaded = function(){
+            initDomReady();
+            CONTEXT.removeEventListener('DOMContentLoaded', arguments.callee, false);
+            CONTEXT.removeEventListener('load', arguments.callee, false);
+        }
+        CONTEXT.addEventListener('DOMContentLoaded', W3CContentLoaded, false);
+        CONTEXT.addEventListener('load', W3CContentLoaded, false);
+    } else if(CONTEXT.attachEvent){
+        var size = 0;
+        var poll = function() {
+            try {
+                // throws errors until after ondocumentready
+                ROOT.doScroll('left');
+                size = ROOT.outerHTML.length;
+                if (size * 1.03 < CONTEXT.fileSize * 1) {
+                    return setTimeout(poll, 50);
                 }
-                setTimeout(function() {
-                    poll(el);
-                });
+            } 
+            catch (e) {
+                return setTimeout(poll, 50);
             }
-        poll();
-        return function(listener) {
-            if (!domLoaded) {
-                dispatcher.add(DOMREADY, listener);
+            initDomReady();
+        }
+        var IEContentLoaded = function(){
+            if(CONTEXT.readyState != 'complete') {
+                poll();
             } else {
-                listener();
+                initDomReady();
+            }
+            CONTEXT.detachEvent('onreadystatechange', arguments.callee);
+            CONTEXT.detachEvent('load', arguments.callee);
+        }
+        CONTEXT.attachEvent('onreadystatechange', IEContentLoaded);
+        CONTEXT.attachEvent('load', IEContentLoaded);
+    } else {
+        // from Simon Willison
+        var oldonload = GLOBAL.onload;
+        GLOBAL.onload = function(event) {
+            initDomReady();
+            if (typeof oldonload == 'function') {
+                oldonload(event || GLOBAL.event);
             }
         }
-    })();
+    }
+    
+    var domReady = function(listener){
+        if (!domLoaded) {
+            dispatcher.add(DOMREADY, listener);
+        } else {
+            listener();
+        }
+    }
 
     /*---------------------------------------------------------------*
      *                      loading mechanism                        *
