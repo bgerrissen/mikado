@@ -111,6 +111,7 @@
     };
         
     var log = function(data) {
+        data.stamp = +new Date();
         errorLog.push(data);
         dispatcher.dispatch(ERROR, data);
     }
@@ -265,7 +266,7 @@
         dispatcher.dispatch(LOADING, {
             path: path,
             timeout: timeout ? Math.max(timeout, config.timeout) : config.timeout,
-            stamp: new Date().getTime()
+            stamp: +new Date()
         });
         return true;
     }
@@ -285,8 +286,7 @@
         message = message || "TIMED OUT ["+path+"] @ "+killers[path].timeout+"ms";
         log({
             message: message,
-            resolution: "timeout",
-            stamp: new Date().getTime()
+            resolution: "timeout"
         });
         var list = pending[path], i = 
             list.length;
@@ -402,8 +402,7 @@
                 targetRecord.library[record.name] = "Access denied!";
                 log({
                     message: "Disallowed acces from "+path+" to "+targetRecord.path,
-                    resolution: "continue",
-                    stamp: new Date().getTime()
+                    resolution: "continue"
                 });
                 continue;
             }
@@ -438,8 +437,7 @@
         } else {
             log({
                 message: "could not resolve path '"+path+"'",
-                resolution: "fail",
-                stamp: new Date().getTime()
+                resolution: "fail"
             });
             return false;
         }
@@ -462,7 +460,7 @@
         setRequired(record);
         dispatcher.dispatch(LOADED, {
             path: record.path,
-            stamp: new Date().getTime()
+            stamp: +new Date()
         });
         if(!loadDependencies(record)) {
             storeRecord(record);
@@ -492,7 +490,7 @@
         registry[record.path] = record;
         dispatcher.dispatch(COMPLETE, {
             path: record.path,
-            stamp: new Date().getTime()
+            stamp: +new Date()
         });
         cleanUp(record.path);
     }
