@@ -14,7 +14,11 @@ mikado.module({
 
     path: "home.dom.EventDispatcher",
     
-    build: function() {
+    include: [
+        "home.lang.ObjectCache"
+    ],
+    
+    build: function(M) {
     
         /*-----------------------------------------------------------------*
          *                          CONSTANTS                              *
@@ -30,69 +34,31 @@ mikado.module({
         var IE_MODEL = !!(ROOT.attachEvent && ROOT.detachEvent && !W3C_MODEL);
         var USE_DOM2 = true;
         
-        // Another attempt to simplify event registry in a more OO way.
-        var EventCache = {
-            _storage: {},
-            
-            // breaks clean code idiom, can be cleaner?
-            get: function(object, key) {
-                if (this.lastCache && this.lastCache.owner === object) {
-                    return this.lastCache.data[key] || (this.lastCache.data[key] = []);
-                }
-                var type = object.nodeName || (Object.prototype.toString.call(object)), storage = this._storage, cache;
-                if (!storage[type]) {
-                    storage[type] = [];
-                } else {
-                    var i = storage[type].length;
-                    while (i--) {
-                        if (storage[type][i].owner === object) {
-                            cache = storage[type][i];
-                            break;
-                        }
-                    }
-                }
-                if (!cache) {
-                    cache = {
-                        owner: object,
-                        data: {}
-                    };
-                    storage[type].push(cache);
-                }
-                this.lastCache = cache;
-                return cache.data[key] || (cache.data[key] = []);
-            },
-            add: function(object, key, value) {
-                this.get(object, key).push(value);
-            },
-            remove: function(object, key, value) {
-                var cache = this.get(object, key);
-                if (!cache) {
-                    return;
-                }
-                if (!value) {
-                    cache.length = 0;
-                    return;
-                }
-                var i = cache.length;
-                while (i--) {
-                    if (value === cache[i]) {
-                        cache.splice(i, 1);
-                    }
-                }
-            },
-            destroy: function(object) {
-                var type = object.tagName || Object.prototype.toString.call(object), storage = this._storage, cache;
-                if (storage[type]) {
-                    var i = storage[type].length;
-                    while (i--) {
-                        if (storage[type][i].owner === object) {
-                            storage[type].splice(i, 1);
-                            break;
-                        }
-                    }
+        /*-----------------------------------------------------------------*
+         *                          EVENTCACHE                             *
+         *-----------------------------------------------------------------*/
+        var EventCache = new M.ObjectCache();
+        
+        // override methods for convenience.
+        EventCache._get = EventCache.get;
+        EventCache.get = function(object, key){
+            var cache = this._get(object);
+            return cache[key] || (cache[key] = []);
+        }
+        
+        EventCache.put = function(object, key, value){
+            this.get(object, key).push(value);
+        }
+        
+        EventCache.remove = function(object, key, value){
+            var cache = this.get(object, key),
+                i = value ? cache.length : (cache.length = 0);
+            while(i--) {
+                if(cache[i] === value) {
+                    cache.splice(i, 1);
                 }
             }
-        };
+        }
         
         /*-----------------------------------------------------------------*
          *                       UTILITY METHODS                           *
@@ -365,7 +331,7 @@ mikado.module({
          *                        IMPLEMENTATION                           *
          *-----------------------------------------------------------------*/
         function EventDispatcher(element) {
-            if (!(this instanceof EventDispatcher)) {
+            if (!this.hasOwnProperty || !(this instanceof EventDispatcher)) {
                 return (element = new EventDispatcher(element));
             }
             this._element = element;
@@ -391,6 +357,10 @@ mikado.module({
         EventDispatcher.clearAll = function(element) {
             return new EventDispatcher(element).clearAll();
         }
+        
+        // Expose as underscored static properties
+        EventDispatcher._Event = Event;
+        EventDispatcher._EventCache = EventCache;
         
         // instance methods.
         EventDispatcher.prototype = {
