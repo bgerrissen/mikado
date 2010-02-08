@@ -16,7 +16,7 @@
  * 		"div.myApplication" : {
  * 			path: "my.space.Application",
  * 			args: ["argument_one", "argument_two"],
- * 			priority: 1 // lower number is higher priority, 0 is no priority.
+ * 			priority: 1 // lower number is higher priority, 0 is NO priority.
  * 		},
  * 		"div.myOtherApplication" : {
  * 			path: "my.space.OtherApplication",
@@ -29,6 +29,7 @@
  * - ponder static methods.
  * - ponder plugins
  * - ponder instance methods.
+ * - auto polling to see if Bootstrapper needs to run again?
  * 
  */
 mikado.module({
@@ -45,7 +46,7 @@ mikado.module({
         
         var Class = function(map){
             
-            if(!(this instanceof Class)) {
+            if(!this.hasOwnProperty || !(this instanceof Class)) {
                 return new Class(map);
             }
             
