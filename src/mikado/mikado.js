@@ -6,7 +6,6 @@
  * 
  * @todo
  * - unit tests
- * - test new killer mechanism properly
  * - investigate alternative for domBuild/domTool
  * - investigate expecting mikado.build to always return an Object or Function.
  * - backup script element load listeners to check if a script was loaded with no 'mikado.module' call inside.
@@ -142,6 +141,11 @@
         RAN: 'ran'
     });
     
+    /**Logs data and dispatches it as event.
+     * 
+     * @param {String} type Event type
+     * @param {Object} data Key/Value hash
+     */
     var log = function(type, data) {
         var e = new Event(type, data);
         eventLog.push(e);
@@ -204,14 +208,6 @@
         }
     }
     
-    var domReady = function(listener){
-        if (!domLoaded) {
-            dispatcher.listen(Event.DOMREADY, listener);
-        } else {
-            listener();
-        }
-    }
-
     /*---------------------------------------------------------------*
      *                      loading mechanism                        *
      *---------------------------------------------------------------*/
@@ -449,37 +445,6 @@
         }
     },
     
-    /**A bit of foolproofing, in case the path in the module is malformed or incorrect.
-     * Checks with 'pending' map on module name.
-     * 
-     * @param {Object} record
-     * @exception {String} Resolve error
-     * @return {Boolean} false if path cannot be resolved
-     */
-    resolvePath = function(record){
-        var name = record.name || getNameFromPath(record.path),
-            path = record.path || name;
-        if(pending[path]) {
-            return true;
-        }
-        var candidates = [], key;
-        for(key in pending) {
-            if(name == getNameFromPath(key)){
-                candidates.push(key);
-            }
-        }
-        if(candidates.length === 1) {
-            record.path = candidates[0];
-        } else {
-            log(Event.ERROR, {
-                path: path,
-                message: "could not resolve path",
-                resolution: "assuming package"
-            });
-        }
-        return true;
-    },
-    
     /**Reformats record for convenience and starts dependency loading if required.
      * Disables the killer mechanism for this specific record.
      * When there are no dependencies, storeRecord() is called right away.
@@ -488,9 +453,6 @@
      * @return {void}
      */
     processRecord = function(record){
-        if(!resolvePath(record)){
-            return;
-        }
         record.name = record.name || getNameFromPath(record.path);
         record.traits = record.traits || {};
         record.traits.path = record.path;
@@ -511,7 +473,7 @@
      */
     storeRecord = function(record){
         if(record.traits.domBuild && !domLoaded) {
-            domReady(function(){
+            dispatcher.listen(Event.DOMREADY, function(){
                 storeRecord(record);
             });
             return false;
@@ -555,10 +517,11 @@
      * @return {void}
      */
     var instantiate = function(record, args) {
-		if (record.traits.domTool && !domLoaded) {
-			return domReady(function() {
+		if (record.traits.domTool && !domLoaded && !record.traits.domIgnore) {
+			dispatcher.listen(Event.DOMREADY, function() {
 				instantiate(record, args);
 			});
+            return;
 		}
         var module = record.module;
 		if (typeof module == "function") {
@@ -597,6 +560,8 @@
          * - traits          A hash of traits that will get passed to the eventObject in mikado events.
          *     - domTool     Set to true if module relies on DOM ready event to be USED.
          *     - domBuild    Set to true if module required DOM to be ready to BUILD.
+         *     - domIgnore   Set to true if a module inherits domTool trait, this will force the module
+         *                   to ignore domReady and simply run even if dom is not fully loaded.
          * 
          * @param {Object} record see above
          * @return {void}
