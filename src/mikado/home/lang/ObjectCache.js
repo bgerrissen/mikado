@@ -73,7 +73,7 @@ mikado.module({
             }
         };
         
-        return Class;
+        return ObjectCache;
         
     }
     

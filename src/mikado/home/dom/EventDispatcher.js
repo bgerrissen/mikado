@@ -368,7 +368,7 @@ mikado.module({
             listen: function(type, listener, capture) {
                 Event.isSupported(type);
                 var key = type + PHASE[capture || false];
-                EventCache.add(this._element, key, listener);
+                EventCache.put(this._element, key, listener);
                 if (listener !== interceptor && this._element.nodeType) {
                     removeListener(this._element, type, interceptor);
                     addListener(this._element, type, interceptor);

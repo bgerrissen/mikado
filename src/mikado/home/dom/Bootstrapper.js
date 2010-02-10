@@ -40,7 +40,9 @@ mikado.module({
 		"home.dom.Selector"
 	],
 	
-	domTool: 1,
+    traits: {
+        domTool: true
+    },
 	
 	build: function(M){
         
