@@ -265,36 +265,34 @@
                 continue;
             }
             if (!pending[path]) {
-                loadDependency(path, record.timeout);
+                pending[path] = [];
             }
             pending[path].push(record);
         }
+        appendScripts(list, record.timeout);
         return list.length ? true : false;
     },
     
-    /**Appends a script tag to the HEAD with the URI to the module.
-     * - calls startKiller()
-     * - creates pending[path] registry
+    /**Iterates over a list of dot notated module paths and appends them to the scriptLocation
+     * through a documentFragment.
      * 
      * @param {String} path Dot notated path to the module, relative to mikado root or repository
      * @param {Number} timeout Timeout override in miliseconds
-     * @return {Boolean} true if dependency is appended, false if dependency is already present.
      */
-    loadDependency = function(path, timeout) {
-        if(registry[path]) {
-            return false;
+    appendScripts = function(list, timeout){
+        var i = list.length, script, path,
+            fragment = document.createDocumentFragment();
+        while(i--){
+            path = list[i];
+            scripts[path] = scriptFragment.cloneNode(true);
+            scripts[path].src = createURI(path);
+            fragment.appendChild(scripts[path]);
+            log(Event.LOADING, {
+                path: path,
+                timeout: timeout
+            });
         }
-        if(!pending[path]) {
-            pending[path] = [];
-        }
-        scripts[path] = scriptFragment.cloneNode(false);
-        scripts[path].src = createURI(path);
-        HEAD.appendChild(scripts[path]);
-        log(Event.LOADING, {
-            path: path,
-            timeout: timeout ? Math.max(timeout, config.timeout) : config.timeout
-        });
-        return true;
+        HEAD.appendChild(fragment);
     },
     
     /*---------------------------------------------------------------*
@@ -457,6 +455,7 @@
         record.traits = record.traits || {};
         record.traits.path = record.path;
         record.traits.name = record.name;
+        record.timeout = record.timeout ? Math.max(timeout, config.timeout) : config.timeout;
         setAllowed(record);
         setRequired(record);
         log(Event.LOADED, record.traits);
@@ -589,7 +588,7 @@
                         dispatcher.deafen(Event.COMPLETE, arguments.callee);
                     }
 				});
-				loadDependency(path);
+				appendScripts([path], config.timeout);
 			} else {
 				instantiate(record, args);
 			}
@@ -604,12 +603,18 @@
          * @return {Object} mikado
          */
         fetch: function(list, timeout) {
-			if(list instanceof Array) {
-				var i = list.length;
-				while(i--) {
-					loadDependency(list[i], timeout);
-				}
-			}
+			if(!(list instanceof Array)) {
+                return this;
+            }
+			var i = list.length;
+            while(i--) {
+                if(pending[list[i]]) {
+                    list.splice(i, 1);
+                }
+            }
+            if (list.length) {
+                appendScripts(list, timeout);
+            }
 			return this;
 		},
         
@@ -682,9 +687,21 @@
             return this;
         },
         
-        /**direct reference to eventLog
+        /**Returns the log items corresponding with the event types passed as arguments.
+         * 
+         * @param {String} type EventType, multiple possible.
+         * @return {Array} list of requested log items, empty if none present.
          */
-        log: eventLog
+        getLog: function(type /*, multiple possible*/){
+            var re = new RegExp("^(?:"+slice.call(arguments).join("|")+")$");
+            var i = eventLog.length, log = [];
+            while(i--){
+                if(re.test(eventLog[i].type) || !type) {
+                    log.unshift(eventLog[i]);
+                }
+            }
+            return log;
+        }
         
     };
         
