@@ -54,6 +54,25 @@ mikado.module({
             this._element = element || document;
         }
         
+        // static methods
+        EventDelegate.listen = function(element, selector, eventType, handler, useCapture) {
+            return new EventDelegate(element).listen(selector, eventType, handler, useCapture);
+        }
+        
+        EventDelegate.deafen = function(element, selector, eventType, handler, useCapture) {
+            return new EventDelegate(element).deafen(selector, eventType, handler, useCapture);
+        }
+        
+        EventDelegate.notify = EventDispatcher.notify;
+        
+        EventDelegate.clear = function(element, selector, eventType) {
+            return new EventDelegate(element).clear(selector, eventType);
+        }
+        
+        EventDelegate.clearAll = function(element) {
+            new EventDelegate(element).destroy();
+        }
+        
         EventDelegate.prototype = {
         
             listen: function(selector, eventType, handler, useCapture) {
