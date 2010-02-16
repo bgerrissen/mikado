@@ -1,6 +1,6 @@
 /**
- * NOTE: CODE IS PURPOSLY BLOATED FOR CLARITY!
- * WORK IN PROGRESS!
+ * @author Ben Gerrissen http://www.netben.nl/ bgerrissen@gmail.com
+ * @license MIT
  *
  * Adapted version of Diego Perini's work.
  *

@@ -1,5 +1,6 @@
 /**
- * @author Ben
+ * @author Ben Gerrissen http://www.netben.nl/ bgerrissen@gmail.com
+ * @license MIT
  */
 mikado.module({
     

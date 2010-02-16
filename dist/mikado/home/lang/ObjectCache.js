@@ -1,0 +1,5 @@
+/**
+ * @author Ben Gerrissen http://www.netben.nl/ bgerrissen@gmail.com
+ * @license MIT
+ */
+mikado.module({path:"home.lang.ObjectCache",build:function(){function A(){if(!this.hasOwnProperty||!(this instanceof A)){return new Class()}this._storage={};this._lastCache=null}A.prototype={_typeOf:function(B){return B.nodeName?B.nodeName:Object.prototype.toString.call(B)},get:function(C,E){var B=this._lastCache;if(B&&B.owner===C){return E?B.data[E]:B.data}var F=this._typeOf(C),G=this._storage[F]||(this._storage[F]=[]),D=G.length;B=null;while(D--){if(G[D].owner===C){B=G[D];break}}if(!B){B={owner:C,data:{}};G.push(B)}this._lastCache=B;return E?B.data[E]:B.data},put:function(B,C,D){this.get(B)[C]=D;return this},remove:function(B,C){delete this.get(B)[C]},destroy:function(B){var D=this._typeOf(B),E=this._storage[D];if(!E){return this}var C=E.length;while(C--){if(E[C].owner===B){E.splice(C,1);break}}return this},destroyAll:function(){this._storage={}}};return A}});
