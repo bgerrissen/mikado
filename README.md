@@ -2,21 +2,21 @@ Mikado
 =====
 
 **** Casual Message ****
-Moved on to RC3!
-Wiki is becomming a mess, really need to work on documentation for just mikado.js.
-Delaying mikado/home framework and demo till documentation is done.
+* Moved on to RC3!
+* Wiki is becomming a mess, really need to work on documentation for just mikado.js.
+* Delaying mikado/home framework and demo till documentation is done.
 
 
 **** Version ****
 *RC3
 
 **** Version History ****
-*19-2-2010 : RC3
-**added descriptor argument option to mikado#run
-**added descriptor options for module descriptor 'fetch' and 'include'
-**fixed bugs related to multiple dependencies in the pending list.
-*24-1-2010 : RC2
-*19-1-2010 : RC1
+* 19-2-2010 : RC3
+** added descriptor argument option to mikado#run
+** added descriptor options for module descriptor 'fetch' and 'include'
+** fixed bugs related to multiple dependencies in the pending list.
+* 24-1-2010 : RC2
+* 19-1-2010 : RC1
 
 **** Module (paralel) loader and alternate dependency resolver ****
 
