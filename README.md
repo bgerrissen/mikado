@@ -2,15 +2,18 @@ Mikado
 =====
 
 **** Casual Message ****
+
 * Moved on to RC3!
 * Wiki is becomming a mess, really need to work on documentation for just mikado.js.
 * Delaying mikado/home framework and demo till documentation is done.
 
 
 **** Version ****
+
 *RC3
 
 **** Version History ****
+
 * 19-2-2010 : RC3
 ** added descriptor argument option to mikado#run
 ** added descriptor options for module descriptor 'fetch' and 'include'
