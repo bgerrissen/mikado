@@ -2,24 +2,18 @@
  * @author Ben Gerrissen http://www.netben.nl/ bgerrissen@gmail.com
  * @license MIT
  * 
- * @version RC2
+ * @version RC3
  * 
  * @todo
- * - unit tests
+ * - unit tests!!!
  * - investigate alternative for domBuild/domTool
  * - investigate expecting mikado.build to always return an Object or Function.
  * - backup script element load listeners to check if a script was loaded with no 'mikado.module' call inside.
  * - More proper error messages.
  * - Security messages?
  * - Module versions?
- * 
- * @notes
- * 
- * Still pondering about repository feature, it's far from understandable in current state.
- * Perhaps require that external repositories to always need the repo token to be set in module
- * definition paths? Another way is to superimpose the repo token to all dependencies.
- * 
- * Dropped mikado.use method, thats more YUI's thing!
+ * - cleaner code
+ * - better architecture
  * 
  */
 
@@ -107,7 +101,7 @@
         },
         dispatch: function(type, data){
             var list = listeners[type], i;
-            var data = data || {};
+            data = data || {};
             data.type = type;
             if (list) {
                 i = list.length;
@@ -264,13 +258,23 @@
                 list.splice(i, 1);
                 continue;
             }
-            if (!pending[path]) {
-                pending[path] = [];
+        }
+        if(!list.length) {
+            return false;
+        }
+        list = [].concat(list);
+        i = list.length;
+        while(i--) {
+            path = list[i];
+            if(pending[path]){
+                list.splice(i, 1);
+                pending[path].push(record);
+            } else {
+                pending[path] = [record];
             }
-            pending[path].push(record);
         }
         appendScripts(list, record.timeout);
-        return list.length ? true : false;
+        return true;
     },
     
     /**Iterates over a list of dot notated module paths and appends them to the scriptLocation
@@ -280,7 +284,7 @@
      * @param {Number} timeout Timeout override in miliseconds
      */
     appendScripts = function(list, timeout){
-        var i = list.length, script, path,
+        var i = list.length, path,
             fragment = document.createDocumentFragment();
         while(i--){
             path = list[i];
@@ -382,6 +386,31 @@
         return list;
     },
     
+    /**Loops over an array to check for dependency descriptors.
+     * If a descriptor contains the attribute 'path' and 'when' is truthy
+     * the list item gets replaced by the path, otherwise it is removed from the list.
+     * If 'path' wasn't a string for some reason, the list item gets removed as well.
+     * 
+     * @param {Array} list
+     * @return {void}
+     */
+    prepareDependencies = function(list){
+        if(list) {
+            var i = list.length;
+            while(i--) {
+                if(typeof list[i] === 'string') {
+                    continue;
+                }
+                if(list[i].path && list[i].when) {
+                    list[i] = list[i].path;
+                }
+                if(typeof list[i] !== 'string') {
+                    list.splice(i,1);
+                }
+            }
+        }
+    },
+    
     /**Concatenates record.fetch and record.include arrays to be used for
      * dependency loading.
      * 
@@ -389,6 +418,8 @@
      * @return {void}
      */
     setRequired = function(record){
+        prepareDependencies(record.fetch);
+        prepareDependencies(record.include);
         record.fetch = record.fetch || [];
         if(record.include instanceof Array) {
             record.fetch = record.fetch.concat(record.include);
@@ -452,7 +483,7 @@
      */
     processRecord = function(record){
         record.name = record.name || getNameFromPath(record.path);
-        record.traits = record.traits || {};
+        record.traits || (record.traits = {});
         record.traits.path = record.path;
         record.traits.name = record.name;
         record.timeout = record.timeout ? Math.max(timeout, config.timeout) : config.timeout;
@@ -516,17 +547,11 @@
      * @return {void}
      */
     var instantiate = function(record, args) {
-		if (record.traits.domTool && !domLoaded && !record.traits.domIgnore) {
-			dispatcher.listen(Event.DOMREADY, function() {
-				instantiate(record, args);
-			});
-            return;
-		}
-        var module = record.module;
+        var module = record.module, instance;
 		if (typeof module == "function") {
             log(Event.RUN, record.traits);
             empty.prototype = module.prototype;
-			var instance = new empty();
+			instance = new empty();
 			module.apply(instance, args);
             log(Event.RAN, record.traits);
 		} else {
@@ -536,6 +561,88 @@
                 resolution: "failed silently"
             });
         }
+        return instance;
+    },
+    
+    /**Runs a module by simple path + args or through a descriptor object.
+     * When running a module through a descriptor object, we can do more.
+     * 
+     * Example using simple path:
+     * 
+     *     mikado.run('some.path.Module', 'argument1', argument2);
+     *     
+     * Example using descriptor:
+     * 
+     *     mikado.run({
+     *         path: 'some.path.Module',
+     *         args: ['argument1', 'argument2'],
+     *         // optional timeout override
+     *         timeout: 30000,
+     *         // optional method call chaining
+     *         invoke: [
+     *             {
+     *                 method: 'someMethod',
+     *                 args: ['argument1', 'argument2']
+     *             },
+     *             {
+     *                 method: 'otherMethod',
+     *                 args: ['argument1', 'argument2']
+     *             },
+     *         ],
+     *         // once done, run next descriptor, same options possible.
+     *         run: {
+     *             path: 'other.path.Module',
+     *             args: ['argument1', 'argument2']
+     *         }
+     *         
+     *     });
+     * 
+     * @param {String} path
+     * @param {Array} args
+     * @param {Object|undefined} descriptor
+     * @param {Number|undefined} timeout
+     * @return {void}
+     */
+    run = function(path, args, descriptor, timeout){
+        var record = registry[path];
+        
+        // try again when module is actually loaded.
+        if(!record) {
+            dispatcher.listen(Event.COMPLETE, function(e){
+                if(e.path === path) {
+                    dispatcher.deafen(Event.COMPLETE, arguments.callee);
+                    run(path, args, descriptor);
+                }
+            });
+            timeout = timeout ? Math.max(config.timeout, timeout) : config.timeout;
+            appendScripts([path], timeout);
+            return;
+        }
+        
+        // relay #run till after DOM is ready and interactive.
+        if (!domLoaded && record.traits.domTool && !record.traits.domIgnore) {
+			dispatcher.listen(Event.DOMREADY, function(e) {
+                dispatcher.deafen(Event.DOMREADY, arguments.callee);
+                run(path, args, descriptor);
+			});
+            return;
+		}
+        
+        var instance = instantiate(record, args);
+        
+        if(instance && descriptor && descriptor.invoke) {
+            var pair;
+            while((pair = descriptor.invoke.shift())) {
+                if(typeof instance[pair.method] === 'function') {
+                    instance[pair.method].apply(instance, pair.args || []);
+                }
+            }
+        }
+        
+        if(descriptor.run) {
+            mikado.run(descriptor.run);
+        }
+        
     },
     
     /*---------------------------------------------------------------*
@@ -578,20 +685,13 @@
          * @param {Object} arguments Multiple possible, any argument the module might require.
          * @return {Object} mikado
          */
-        run: function(path /*, arguments*/) {
-			var args = slice.call(arguments, 1), 
-                record = registry[path];
-			if (!record) {
-				dispatcher.listen(Event.COMPLETE, function(e) {
-                    if (e.path == path) {
-                        instantiate(registry[path], args);
-                        dispatcher.deafen(Event.COMPLETE, arguments.callee);
-                    }
-				});
-				appendScripts([path], config.timeout);
-			} else {
-				instantiate(record, args);
-			}
+        run: function() {
+			var args = slice.call(arguments);
+            if(typeof args[0] === 'string') {
+                run(args.shift(), args);
+            } else if(args.length === 1) {
+                run(args[0].path, args[0].args, args[0], args[0].timeout);
+            }
 			return this;
 		},
         
