@@ -2,7 +2,7 @@
  * @author Ben Gerrissen http://www.netben.nl/ bgerrissen@gmail.com
  * @license MIT
  * 
- * @version RC3
+ * @version 1.0 RC3.1
  * 
  * @todo
  * - unit tests!!!
@@ -212,8 +212,8 @@
         if(!list || !list.length) {
             return;
         }
-        var i = list.length, j, current;
-        while((current = list[--i])) {
+        var i = list.length, j, current = list[--i];
+        while(current) {
             j = current.fetch.length;
             while(j && j--) {
                 if(current.fetch[j] != e.path) {
@@ -225,6 +225,7 @@
                     list.splice(i, 1);
                 }
             }
+            current = list[--i];
         }
     });
         
@@ -234,6 +235,7 @@
      * @return {String} URI to module file.
      */
     var createURI = function(path) {
+        path = path.path || path;
         for(var key in config.repositories) {
             if(RegExp("^"+key).test(path)) {
                 return config.repositories[key] + path.replace(/\./g, "/") + ".js";
@@ -254,6 +256,9 @@
         var list = record.fetch, i = list.length, path;
         while(i--) {
             path = list[i];
+            if(path.path) {
+                list[i] = path.path;
+            }
             if(registry[path]){
                 list.splice(i, 1);
                 continue;
@@ -317,8 +322,8 @@
             message: message,
             resolution: "failed silently"
         });
-        var list = pending[path], i = 
-            list.length;
+        var list = pending[path], 
+            i = list.length;
         while(i--) {
             kill(list[i].path, message);
             delete list[i];
@@ -366,6 +371,7 @@
      * @return {String} name of the module.
      */
     var getNameFromPath = function(path){
+        path = path.path || path;
         return path ? path.split(".").pop() : null;
     },
     
@@ -376,39 +382,28 @@
      * @return {void}
      */
     enforce = function(list) {
+        if(!list){
+            return;
+        }
         var i = list.length, name;
         while(i--) {
+            if(list[i].path && 'when' in list[i] && !list[i].when) {
+                list.splice(i, 1);
+                continue;
+            }
+            if(list[i].path) {
+                name = getNameFromPath(list[i].path);
+                if(name && config.force[name]) {
+                    list[i].path = config.force[name];
+                }
+                continue;
+            }
             name = getNameFromPath(list[i]);
             if(name && config.force[name]) {
                 list[i] = config.force[name];
             }
         }
         return list;
-    },
-    
-    /**Loops over an array to check for dependency descriptors.
-     * If a descriptor contains the attribute 'path' and 'when' is truthy
-     * the list item gets replaced by the path, otherwise it is removed from the list.
-     * If 'path' wasn't a string for some reason, the list item gets removed as well.
-     * 
-     * @param {Array} list
-     * @return {void}
-     */
-    prepareDependencies = function(list){
-        if(list) {
-            var i = list.length;
-            while(i--) {
-                if(typeof list[i] === 'string') {
-                    continue;
-                }
-                if(list[i].path && list[i].when) {
-                    list[i] = list[i].path;
-                }
-                if(typeof list[i] !== 'string') {
-                    list.splice(i,1);
-                }
-            }
-        }
     },
     
     /**Concatenates record.fetch and record.include arrays to be used for
@@ -418,13 +413,13 @@
      * @return {void}
      */
     setRequired = function(record){
-        prepareDependencies(record.fetch);
-        prepareDependencies(record.include);
         record.fetch = record.fetch || [];
+        enforce(record.fetch);
+        enforce(record.include);
         if(record.include instanceof Array) {
             record.fetch = record.fetch.concat(record.include);
         }
-        return enforce(record.fetch);
+        return record.fetch;
     },
     
     /**Reformats allowed array to object map.
@@ -451,13 +446,14 @@
         var list = targetRecord.include,
             i = list.length,
             client = targetRecord.path,
-            record, path;
+            record, path, name;
         targetRecord.library = {};
         while(i--) {
-            path = list[i];
+            alias = list[i].alias;
+            path = list[i].path || list[i];
             record = registry[path];
             if(record.allow && !record.allow[client]) {
-                targetRecord.library[record.name] = "Access denied!";
+                targetRecord.library[alias||record.name] = "Access denied!";
                 log(Event.ERROR, {
                     path: targetRecord.path,
                     message: "Disallowed acces to '"+path+"'",
@@ -469,8 +465,9 @@
                 targetRecord.traits.domTool = true;
             }
             if (record.module) {
-                targetRecord.library[record.name] = record.module;
+                targetRecord.library[alias||record.name] = record.module;
             }
+            alias = null;
         }
     },
     
@@ -482,11 +479,13 @@
      * @return {void}
      */
     processRecord = function(record){
+        
         record.name = record.name || getNameFromPath(record.path);
         record.traits || (record.traits = {});
         record.traits.path = record.path;
         record.traits.name = record.name;
         record.timeout = record.timeout ? Math.max(timeout, config.timeout) : config.timeout;
+        
         setAllowed(record);
         setRequired(record);
         log(Event.LOADED, record.traits);
