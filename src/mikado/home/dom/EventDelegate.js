@@ -10,7 +10,7 @@ mikado.module({
         domTool: true
     },
     
-    include: ["home.dom.EventDispatcher", "home.dom.Selector", "home.lang.ObjectCache"],
+    include: ["home.dom.EventDispatcher", "home.dom.Selector", "home.util.ObjectCache"],
     
     build: function(M) {
     

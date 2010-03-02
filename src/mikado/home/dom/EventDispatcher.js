@@ -15,7 +15,7 @@ mikado.module({
     path: "home.dom.EventDispatcher",
     
     include: [
-        "home.lang.ObjectCache"
+        "home.util.ObjectCache"
     ],
     
     build: function(M) {

@@ -12,7 +12,7 @@
  * 
  * example:
  * 
- * 	mikado.run("home.dom.Bootstrap", {
+ * 	mikado.run("home.dom.BootStrapper", {
  * 		"div.myApplication" : {
  * 			path: "my.space.Application",
  * 			args: ["argument_one", "argument_two"],
@@ -34,7 +34,7 @@
  */
 mikado.module({
 	
-	path: "home.dom.Bootstrapper",
+	path: "home.dom.BootStrapper",
 	
 	include: [
 		"home.dom.Selector"
@@ -46,7 +46,7 @@ mikado.module({
 	
 	build: function(M){
         
-        var Class = function(map){
+        var BootStrapper = function(map){
             
             if(!this.hasOwnProperty || !(this instanceof Class)) {
                 return new Class(map);
@@ -60,7 +60,7 @@ mikado.module({
             
         }
     
-        Class.prototype = {
+        BootStrapper.prototype = {
             
             _storage: {0:[]},
             
@@ -143,7 +143,7 @@ mikado.module({
             }
         }
         
-        return Class;
+        return BootStrapper;
     }
     	
 });

@@ -17,7 +17,7 @@
  * 
  */
 
-(function() {
+(function(GLOBAL, CONTEXT) {
     
 	/*---------------------------------------------------------------*
 	 *           settings, variables and constants                   *
@@ -25,11 +25,16 @@
     
     var registry = {}, scripts = {}, pending = {}, killers = {}, eventLog = [],
         
-    domLoaded = 0,
+    domLoaded = 0, warningsEnabled = 0,
         
-    GLOBAL = this, CONTEXT = GLOBAL.document, ROOT = CONTEXT.documentElement,
+    ROOT = CONTEXT.documentElement,
         
     HEAD = CONTEXT.getElementsByTagName("head")[0],
+    
+    supportsProto = (function(){
+        var a = {i:1}, b = {__proto__:a};
+        return !!b.i;
+    }()),
     
     config = {
         
@@ -77,6 +82,14 @@
             }
         }
         return receiver;
+    },
+    
+    create = Object.create || supportsProto ? function(object, properties){
+        return properties ? augment({__proto__:object}, properties) : {__proto__:object};
+    } : function(object, properties){
+        empty.prototype = object;
+        object = new empty();
+        return properties ? augment(object, properties) : object;
     },
         
     // Internal abstract EventDispatcher factory method.
@@ -145,11 +158,14 @@
         eventLog.push(e);
         dispatcher.dispatch(type, e);
     },
+    
+    domReadyEvent,
         
     initDomReady = function(){
         if(!domLoaded) {
             domLoaded = 1;
-            dispatcher.dispatch(Event.DOMREADY);
+            domReadyEvent = new Event(Event.DOMREADY);
+            dispatcher.dispatch(Event.DOMREADY, domReadyEvent);
         }
     }
     
@@ -549,8 +565,7 @@
         var module = record.module, instance;
 		if (typeof module == "function") {
             log(Event.RUN, record.traits);
-            empty.prototype = module.prototype;
-			instance = new empty();
+			instance = create(module.prototype);
 			module.apply(instance, args);
             log(Event.RAN, record.traits);
 		} else {
@@ -638,7 +653,7 @@
             }
         }
         
-        if(descriptor.run) {
+        if(descriptor && descriptor.run) {
             mikado.run(descriptor.run);
         }
         
@@ -770,7 +785,11 @@
          * @param {Function} handler
          * @return {Object} mikado
          */
-        listen: function(eventType, handler){
+        subscribe: function(eventType, handler){
+            if(eventType === Event.DOMREADY && domLoaded) {
+                handler(domReadyEvent);
+                return this;
+            }
             dispatcher.listen(eventType, handler)
             return this;
         },
@@ -781,7 +800,7 @@
          * @param {Function} handler
          * @return {Object} mikado
          */
-        deafen: function(eventType, handler){
+        unsubscribe: function(eventType, handler){
             dispatcher.deafen(eventType, handler)
             return this;
         },
@@ -800,6 +819,15 @@
                 }
             }
             return log;
+        },
+        
+        warn: function(){
+            if (!warningsEnabled) {
+                dispatcher.listen(Event.ERROR, function(e) {
+                    alert(e.message + '\n' + e.resolution + '\n' + e.path);
+                });
+                warningsEnabled = 1;
+            }
         }
         
     };
@@ -807,4 +835,4 @@
    // unleash mikado
    GLOBAL.mikado =  api;
 
-})();
+})(this, this.document);
