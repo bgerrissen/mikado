@@ -1,362 +1,390 @@
-/**
- * @author Ben Gerrissen http://www.netben.nl/ bgerrissen@gmail.com
- * @license MIT
- * 
- * @version 1.0 RC3.1
- * 
- * @todo
- * - unit tests!!!
- * - investigate alternative for domBuild/domTool
- * - investigate expecting mikado.build to always return an Object or Function.
- * - backup script element load listeners to check if a script was loaded with no 'mikado.module' call inside.
- * - More proper error messages.
- * - Security messages?
- * - Module versions?
- * - cleaner code
- * - better architecture
- * 
- */
 
-(function(GLOBAL, CONTEXT) {
+
+
+(function(global){
     
-	/*---------------------------------------------------------------*
-	 *           settings, variables and constants                   *
-	 *---------------------------------------------------------------*/
+    var slice = Array.prototype.slice
     
-    var registry = {}, scripts = {}, pending = {}, killers = {}, eventLog = [],
-        
-    domLoaded = 0, warningsEnabled = 0,
-        
-    ROOT = CONTEXT.documentElement,
-        
-    HEAD = CONTEXT.getElementsByTagName("head")[0],
+    , timeout = 1500
     
-    supportsProto = (function(){
-        var a = {i:1}, b = {__proto__:a};
-        return !!b.i;
-    }()),
+    , doc = global.document
     
-    config = {
+    , registry = {}
+    
+    , pending = {}
+    
+    , scripts = {}
+    
+    , killers = {}
+	
+	, aliases = {}
+    
+    , repositories = {}
+    
+    , forced = {}
+    
+    , root = '/'
         
-        // default time in miliseconds a module is allowed to take for loading.
-        timeout: 1500,
-        
-        // default folder repository to attach module paths to.
-        root:function() {
-            var list = CONTEXT.getElementsByTagName("script"),
-                i = 0,
-                re = /\/mikado[^\/\\]*\.js.?$/i,
-                node;
-            while((node = list[i++])) {
-                if(re.test(node.src)) {
-                    return node.src.replace(re, "");
-                }
+    , anchor = (function(){
+        var list = doc.getElementsByTagName('script')
+        , node
+        , i = list.length
+        , re = /\/mikado[^\/\\]*\.js.?$/i;
+        while((node = list[--i])){
+            if(re.test(node.src)){
+                root = node.src.replace(re, '');
+                return node;
             }
-        }(),
-        
-        // external repository map
-        repositories: {},
-        
-        // path override map
-        force: {}
-    },
-        
-    // used to create script elements for module loading.
-    scriptFragment = CONTEXT.createElement("script");
-    scriptFragment.type = "text/javascript";
-        
-    // used to instantiate modules.
-    var empty = function(){},
-        
-    /*---------------------------------------------------------------*
-     *                           utility                             *
-     *---------------------------------------------------------------*/
-        
-    // no explanation needed to JS devs.
-    slice = Array.prototype.slice,
+        }
+    })()
     
-    augment = function(receiver, provider){
+    , script = doc ? doc.createElement('script') : null
+    
+    , events = {
+        'loading' : []
+        , 'loaded' : []
+        , 'complete' : []
+        , 'run' : []
+        , 'ran' : []
+        , 'error' : []
+    }
+    
+    , augment = function(receiver, provider){
         if (provider) {
             for (var key in provider) {
-                receiver[key] = provider[key];
+                provider.hasOwnProperty(key) && (receiver[key] = provider[key]);
             }
         }
         return receiver;
-    },
+    }
     
-    create = Object.create || supportsProto ? function(object, properties){
-        return properties ? augment({__proto__:object}, properties) : {__proto__:object};
-    } : function(object, properties){
-        empty.prototype = object;
-        object = new empty();
-        return properties ? augment(object, properties) : object;
-    },
-        
-    // Internal abstract EventDispatcher factory method.
-    listeners = {},
-    dispatcher = {
-        listen: function(type, listener) {
-            if (!listeners[type]) {
-                listeners[type] = [];
-            }
-            listeners[type].unshift(listener);
-        },
-        deafen: function(type, listener) {
-            var list = listeners[type], i;
-            if (list) {
-                i = list.length;
-                while (i--) {
-                    if (list[i] === listener) {
-                        list.splice(i, 1);
-                    }
-                }
-            }
-        },
-        dispatch: function(type, data){
-            var list = listeners[type], i;
-            data = data || {};
-            data.type = type;
-            if (list) {
-                i = list.length;
-                while (i--) {
-                    list[i](data);
-                }
-            }
-        }
-    },
+    , empty = function(){}
     
-    Event = function(type, data){
-        this.type = type || this.type;
+    , clone = '__proto__' in {} ? function(obj, properties){
+        return properties ? augment({__proto__:obj}, properties) : {__proto__:obj};
+    } : function(obj, properties){
+        empty.prototype = obj;
+        obj = new empty;
+        return properties ? augment(obj, properties) : obj;
+    }
+    
+    , Event = function(type, data){
+        this.type = type;
         this.timestamp = +new Date();
         augment(this, data);
     }
     
-    Event.prototype = {
-        type: 'none',
-        message: null,
-        resolution: null,
-        path: null
-    };
-    
-    augment(Event, {
-        COMPLETE: 'complete',
-        LOADING: 'loading',
-        LOADED: 'loaded',
-        ERROR: 'error',
-        DOMREADY: 'domReady',
-        RUN: 'run',
-        RAN: 'ran'
-    });
-    
-    /**Logs data and dispatches it as event.
-     * 
-     * @param {String} type Event type
-     * @param {Object} data Key/Value hash
-     */
-    var log = function(type, data) {
-        var e = new Event(type, data);
-        eventLog.push(e);
-        dispatcher.dispatch(type, e);
-    },
-    
-    domReadyEvent,
-        
-    initDomReady = function(){
-        if(!domLoaded) {
-            domLoaded = 1;
-            domReadyEvent = new Event(Event.DOMREADY);
-            dispatcher.dispatch(Event.DOMREADY, domReadyEvent);
-        }
+    , listen = function(type, listener, scope){
+        events[type] && events[type].push({
+            listener: listener,
+            scope: scope
+        });
     }
     
-    // based on Diego Perini's work.
-    // http://javascript.nwbox.com/ContentLoaded/ +
-    // http://javascript.nwbox.com/IEContentLoaded/
-    if(CONTEXT.addEventListener) {
-        var W3CContentLoaded = function(){
-            initDomReady();
-            CONTEXT.removeEventListener('DOMContentLoaded', arguments.callee, false);
-            CONTEXT.removeEventListener('load', arguments.callee, false);
-        }
-        CONTEXT.addEventListener('DOMContentLoaded', W3CContentLoaded, false);
-        CONTEXT.addEventListener('load', W3CContentLoaded, false);
-    } else if(CONTEXT.attachEvent){
-        var size = 0;
-        var poll = function() {
-            try {
-                // throws errors until after ondocumentready
-                ROOT.doScroll('left');
-                size = ROOT.outerHTML.length;
-                if (size * 1.03 < CONTEXT.fileSize * 1) {
-                    return setTimeout(poll, 50);
-                }
-            } 
-            catch (e) {
-                return setTimeout(poll, 50);
-            }
-            initDomReady();
-        }
-        var IEContentLoaded = function(){
-            if(CONTEXT.readyState != 'complete') {
-                poll();
-            } else {
-                initDomReady();
-            }
-            CONTEXT.detachEvent('onreadystatechange', arguments.callee);
-            CONTEXT.detachEvent('load', arguments.callee);
-        }
-        CONTEXT.attachEvent('onreadystatechange', IEContentLoaded);
-        CONTEXT.attachEvent('load', IEContentLoaded);
-    } else {
-        // from Simon Willison
-        var oldonload = GLOBAL.onload;
-        GLOBAL.onload = function(event) {
-            initDomReady();
-            if (typeof oldonload == 'function') {
-                oldonload(event || GLOBAL.event);
+    , deafen = function(type, listener, scope){
+        var list = events[type], i;
+        if (list && (i = list.length)) {
+            while (i--) {
+                list[i] === listener && list.splice(i, 1);
             }
         }
     }
     
-    /*---------------------------------------------------------------*
-     *                      loading mechanism                        *
-     *---------------------------------------------------------------*/
-    
-    // Adding a global handler to store records once all dependencies are loaded.
-    dispatcher.listen(Event.COMPLETE, function(e){
-        var list = pending[e.path];
-        if(!list || !list.length) {
-            return;
-        }
-        var i = list.length, j, current = list[--i];
-        while(current) {
-            j = current.fetch.length;
-            while(j && j--) {
-                if(current.fetch[j] != e.path) {
-                    continue;
-                }
-                current.fetch.splice(j, 1);
-                if(!current.fetch.length) {
-                    storeRecord(current);
-                    list.splice(i, 1);
-                }
+    , announce = function(type, data){
+        var list = events[type]
+        , i = 0
+        , item;
+        if (list && list.length) {
+            data = new Event(type, data);
+            while ((item = list[i++])) {
+                item.scope ? item.listener.call(item.scope, data) : item.listener(data);
             }
-            current = list[--i];
         }
-    });
-        
-    /**Creates a proper URI from the dot notated path.
-     * 
-     * @param {String} path Dot notated path to the module, relative to mikado root or repository
-     * @return {String} URI to module file.
-     */
-    var createURI = function(path) {
-        path = path.path || path;
-        for(var key in config.repositories) {
+    }
+
+    , getURI = function(path){
+        var bits = path.split('-');
+        if(bits.length > 2){
+            announce('error', {
+                path: path,
+                message: "Malformed path, only 1 instance of ´-´ is allowed to signify version.",
+                resolution: "failed silently"
+            });
+        }
+        bits[0] = bits[0].replace(/\./g, '/');
+        var url = bits.join('-');
+        for(var key in repositories) {
             if(RegExp("^"+key).test(path)) {
-                return config.repositories[key] + path.replace(/\./g, "/") + ".js";
+                return repositories[key] + url + ".js";
             }
         }    
-	    return config.root + "/" + path.replace(/\./g, "/") + ".js";
-    },
+        return root + "/" + url + ".js";
+    }
     
-    /**Loads all dependencies defined in the module record.
+    , getName = function(path){
+        return path.replace(/-.*$/,'').split('.').pop();
+    }
+    
+    /**@id load
      * 
-     * @param {Object} record Module data and builder method.
-     * @return {Boolean} true when there where dependencies that needed to be loaded.
+     * @param {Object} record
+     * @return {Boolean}
      */
-    loadDependencies = function(record){
+    , load = function(record){
+        
         if(!record.fetch || !record.fetch.length){
             return false;
         }
-        var list = record.fetch, i = list.length, path;
+        
+        var list = record.fetch
+        , i = list.length
+        , fragment = doc.createDocumentFragment()
+        , path;
+        
         while(i--) {
-            path = list[i];
-            if(path.path) {
-                list[i] = path.path;
-            }
+            path = list[i].path || list[i];
+            
             if(registry[path]){
                 list.splice(i, 1);
                 continue;
             }
-        }
-        if(!list.length) {
-            return false;
-        }
-        list = [].concat(list);
-        i = list.length;
-        while(i--) {
-            path = list[i];
-            if(pending[path]){
-                list.splice(i, 1);
-                pending[path].push(record);
-            } else {
+            
+            if (!pending[path]) {
+                (scripts[path] = script.cloneNode(true)).src = getURI(path);
+                fragment.appendChild(scripts[path]);
+                
                 pending[path] = [record];
+                
+                announce('loading', {
+                    path: path,
+                    timeout: record.timeout
+                });
+                
+            } else {
+                
+                pending[path].push(record);
+                
             }
         }
-        appendScripts(list, record.timeout);
-        return true;
-    },
+        
+        list.length && anchor.parentNode.insertBefore(fragment, anchor);
+        
+        return !!list.length;
+        
+    }
     
-    /**Iterates over a list of dot notated module paths and appends them to the scriptLocation
-     * through a documentFragment.
+    /**@id single
      * 
-     * @param {String} path Dot notated path to the module, relative to mikado root or repository
-     * @param {Number} timeout Timeout override in miliseconds
+     * @param {Object} path
+     * @param {Object} timeout
      */
-    appendScripts = function(list, timeout){
-        var i = list.length, path,
-            fragment = document.createDocumentFragment();
+    , single = function(path, tout){
+        if(pending[path]) return;
+        tout = tout ? tout < timeout && (tout = timeout) : timeout;
+        pending[path] = [];
+        (scripts[path] = script.cloneNode(true)).src = getURI(path);
+        anchor.parentNode.insertBefore(scripts[path], anchor);
+        announce('loading', {
+            path: path,
+            timeout: tout
+        });
+    }
+    
+    /**@id process
+     * 
+     * @param {Object} record
+     */
+    , process = function(record){
+        record.name = getName(record.path);
+        record.traits || (record.traits = {});
+        record.traits.path = record.path;
+        record.traits.name = record.name;
+        record.library = {};
+        record.timeout && record.timeout < timeout || (record.timeout = timeout);
+        
+        record.eventData = augment({
+            module: null
+        }, record.traits);
+        
+        allowed(record);
+        required(record);
+        
+        announce('loaded', record.eventData);
+        
+        !load(record) && store(record);
+    }
+    
+    , allowed = function(record){
+        if(!record.allow) {
+            return;
+        }
+        record.allow = [].concat(record.allow);
+        var list = record.allow
+        , path;
+        record.allow = {};
+        while((path = list.pop())) {
+            record.allow[path] = true;
+        }
+    }
+    
+    , required = function(record){
+        if(!record.fetch && !record.include) {
+            return;
+        }
+        record.fetch = record.fetch ? [].concat(record.fetch) : [];
+        record.include = record.include ? [].concat(record.include) : [];
+        
+        record.fetch.length && enforce(record.fetch);
+        record.include.length && enforce(record.include);
+
+        record.fetch = record.fetch.concat(record.include);
+    }
+    
+    , enforce = function(list){
+        var i = list.length
+        , name
+        , path;
         while(i--){
-            path = list[i];
-            scripts[path] = scriptFragment.cloneNode(true);
-            scripts[path].src = createURI(path);
-            fragment.appendChild(scripts[path]);
-            log(Event.LOADING, {
-                path: path,
-                timeout: timeout
+            if(list[i].path && 'when' in list[i] && !list[i].when) {
+                list.splice(i, 1);
+                continue;
+            }
+            path = list[i].path || list[i];
+            name = getName(path);
+			console.log(forced)
+			console.log(name)
+            if(name && forced[name]) {
+				console.log('FORCING NAME')
+                (list[i].path && (list[i].path = forced[name])) || (list[i] = forced[name]);
+            }
+        }
+    }
+    
+    , libraries = function(target){
+        if(!target.include){
+            return;
+        }
+        var list = target.include
+        , i = list.length
+        , lib = target.library
+        , item, name, path, record;
+        
+        while((item = list[--i])){
+            path = item.path || item;
+            record = registry[path];
+            name = item.alias || item.as || record.name;
+            
+            if (record.allow && !record.allow[target.path]) {
+                lib[name] = 'Access denied!';
+                announce('error', {
+                    path: target.path,
+                    message: "Disallowed access to '"+path+"'",
+                    resolution: "failed silently"
+                });
+                continue;
+            }
+            
+            record.module && (lib[name] = record.module);
+            
+        }
+    }
+    
+    , store = function(record){
+        libraries(record);
+        record.eventData.module = record.module = record.build.call(record.traits, record.library);
+        delete record.build;
+        registry[record.path] = record;
+        announce('complete', record.eventData);
+        return 1;
+    }
+    
+    , instantiate = function(record, descriptor){
+        var module = record.module
+        , init = descriptor.init
+        , instance;
+        if (typeof module == "function") {
+            announce('run', record.traits);
+            instance = clone(module.prototype);
+            module.apply(instance, descriptor.args);
+            announce('ran', record.traits);
+        } else if (init && record.module[init]) {
+            instance = record.module;
+            instance[init].apply(instance, descriptor.args);
+        } else {
+            announce('error', {
+                path: record.path,
+                message: "Nothing is run at '"+record.path+"'",
+                resolution: "failed silently"
             });
         }
-        HEAD.appendChild(fragment);
-    },
+        return instance;
+    }
     
-    /*---------------------------------------------------------------*
-     *                      killing mechanism                        *
-     *---------------------------------------------------------------*/
+    , run = function(descriptor){
+		
+		if(/^@([^@]*)/g.test(descriptor.path)) {
+			descriptor.path = descriptor.path.replace(/^@[^@]*/g,aliases[RegExp.$1]);
+		}
+        
+        if(/#/.test(descriptor.path)){
+            var b = descriptor.path.split('#');
+            descriptor.path = b[0];
+            descriptor.init = b[1];
+        }
+        
+        var record = registry[descriptor.path]
+        , instance
+        , pair;
+        
+        if(!record){
+            var listener = function(e){
+                if(e.path === descriptor.path){
+                    deafen('complete', listener);
+                    run(descriptor);
+                }
+            }
+            listen('complete', listener);
+            single(descriptor.path, descriptor.timeout);
+            return false;
+        }
+        
+       instance = instantiate(record, descriptor);
+        
+        if(instance && descriptor && descriptor.invoke) {
+            while((pair = descriptor.invoke.shift())) {
+                typeof instance[pair.method] === 'function' && instance[pair.method].apply(instance, pair.args || []);
+            }
+        }
+        
+        if(descriptor && descriptor.run) {
+            mikado.run(descriptor.run);
+        }
+    }
     
-    /**Recursively cleans up trail a timedout module leaves behind.
-     * 
-     * @param {String} path Dot notated path to the module, relative to mikado root or repository
-     * @param {String} message Error message, will be appended to script element in type attribute.
-     * @return {void}
-     */
-    kill = function(path, message){
-        var prefix = message ? "Dependency '"+path+"'" : "";
-        message = message || "Timed out @ "+killers[path].timeout+"ms";
-        log(Event.ERROR, {
+    , kill = function(path, message, stack){
+        message = message ? message : "Timed out at "+killers[path].timeout+"ms ";
+        (stack = stack || []).push(path);
+        announce('error', {
             path: path,
-            message: message,
+            message: message + stack.join(' -> '),
             resolution: "failed silently"
         });
         var list = pending[path], 
             i = list.length;
         while(i--) {
-            kill(list[i].path, message);
+            kill(list[i].path, message, stack);
             delete list[i];
         }
         delete pending[path];
     }
     
-    /**Initializes a timeout procedure, calling kill() when timeout is achieved.
-     * 
-     * @param {String} path Dot notated path to the module, relative to mikado root or repository
-     * @param {Number} timeout Timeout override in miliseconds
-     * @return {Boolean} false if timeout mechanism is disabled through config.timeout
-     */
-    dispatcher.listen(Event.LOADING, function(e){
-        if(!config.timeout) {
+    
+    
+    listen('loading', function(e){
+        if(!timeout) {
             return false;
         }
+        
         killers[e.path] = {
             timeout: e.timeout,
             timeoutID: setTimeout(function(){
@@ -364,475 +392,131 @@
             }, e.timeout)
         };
         
+        listen('loaded', function(e){
+            if (killers[e.path]) {
+                clearInterval(killers[e.path].timeoutID);
+                delete killers[e.path];
+            }
+        });
+        
         return true;
-    })
-    
-    /**Shuts down the timeout procedure once the module has loaded
-     * (but not yet stored) and cleans up killer footprint.
-     */
-    dispatcher.listen(Event.LOADED, function(e){
-        if (killers[e.path]) {
-            clearInterval(killers[e.path].timeoutID);
-            delete killers[e.path];
-        }
-    });
-        
-    /*---------------------------------------------------------------*
-     *                       record mechanism                        *
-     *---------------------------------------------------------------*/
-    
-    /**Filters the module name from dot notated path.
-     * 
-     * @param {String} path Dot notated path to the module, relative to mikado root or repository
-     * @return {String} name of the module.
-     */
-    var getNameFromPath = function(path){
-        path = path.path || path;
-        return path ? path.split(".").pop() : null;
-    },
-    
-    /**Checks dependencies on module name and forces relative set module paths
-     * defined in config.force map.
-     * 
-     * @param {Array} list List of module paths (dot notated)
-     * @return {void}
-     */
-    enforce = function(list) {
-        if(!list){
-            return;
-        }
-        var i = list.length, name;
-        while(i--) {
-            if(list[i].path && 'when' in list[i] && !list[i].when) {
-                list.splice(i, 1);
-                continue;
-            }
-            if(list[i].path) {
-                name = getNameFromPath(list[i].path);
-                if(name && config.force[name]) {
-                    list[i].path = config.force[name];
-                }
-                continue;
-            }
-            name = getNameFromPath(list[i]);
-            if(name && config.force[name]) {
-                list[i] = config.force[name];
-            }
-        }
-        return list;
-    },
-    
-    /**Concatenates record.fetch and record.include arrays to be used for
-     * dependency loading.
-     * 
-     * @param {Object} record Module data and builder method.
-     * @return {void}
-     */
-    setRequired = function(record){
-        record.fetch = record.fetch || [];
-        enforce(record.fetch);
-        enforce(record.include);
-        if(record.include instanceof Array) {
-            record.fetch = record.fetch.concat(record.include);
-        }
-        return record.fetch;
-    },
-    
-    /**Reformats allowed array to object map.
-     * 
-     * @param {Object} record
-     * @return {void}
-     */
-    setAllowed = function(record){
-        if(record.allow instanceof Array) {
-            var list = record.allow, path;
-            record.allow = {};
-            while((path = list.pop())) {
-                record.allow[path] = true;
-            }
-        }
-    },
-    
-    /**Builds library object containing 'include' dependency modules.
-     * 
-     * @param {Object} targetRecord
-     * @return {void}
-     */
-    setLibraries = function(targetRecord) {
-        var list = targetRecord.include,
-            i = list.length,
-            client = targetRecord.path,
-            record, path, name;
-        targetRecord.library = {};
-        while(i--) {
-            alias = list[i].alias;
-            path = list[i].path || list[i];
-            record = registry[path];
-            if(record.allow && !record.allow[client]) {
-                targetRecord.library[alias||record.name] = "Access denied!";
-                log(Event.ERROR, {
-                    path: targetRecord.path,
-                    message: "Disallowed acces to '"+path+"'",
-                    resolution: "failed silently"
-                });
-                continue;
-            }
-            if(record.traits.domTool) {
-                targetRecord.traits.domTool = true;
-            }
-            if (record.module) {
-                targetRecord.library[alias||record.name] = record.module;
-            }
-            alias = null;
-        }
-    },
-    
-    /**Reformats record for convenience and starts dependency loading if required.
-     * Disables the killer mechanism for this specific record.
-     * When there are no dependencies, storeRecord() is called right away.
-     * 
-     * @param {Object} record
-     * @return {void}
-     */
-    processRecord = function(record){
-        
-        record.name = record.name || getNameFromPath(record.path);
-        record.traits || (record.traits = {});
-        record.traits.path = record.path;
-        record.traits.name = record.name;
-        record.timeout = record.timeout ? Math.max(timeout, config.timeout) : config.timeout;
-        
-        setAllowed(record);
-        setRequired(record);
-        log(Event.LOADED, record.traits);
-        if(!loadDependencies(record)) {
-            storeRecord(record);
-        }
-    },
-    
-    /**Builds the final record or delays building till DOM is ready depending on record.traits.domBuild setting.
-     * Notifies any module listeners that rely on current record.
-     * 
-     * @param {Object} record
-     * @return {void}
-     */
-    storeRecord = function(record){
-        if(record.traits.domBuild && !domLoaded) {
-            dispatcher.listen(Event.DOMREADY, function(){
-                storeRecord(record);
-            });
-            return false;
-        }
-        if(record.include instanceof Array) {
-            setLibraries(record);
-        }
-        if(typeof record.build == "function") {
-            try {
-                record.module = record.build(record.library);
-                delete record.build;
-            } catch(e) {
-                log(Event.ERROR, {
-                    error: e,
-                    path: record.path,
-                    message: 'failed to build module',
-                    resolution: 'failed silently'
-                });
-            }
-        }
-        registry[record.path] = record;
-        log(Event.COMPLETE, record.traits);
-    }
-    
-    /**Cleans up footprint.
-     */
-    dispatcher.listen(Event.COMPLETE, function(e){
-        if(scripts[e.path]) {
-            scripts[e.path].parentNode.removeChild(scripts[e.path]);
-        }
-        delete pending[e.path];
-        delete scripts[e.path];
     });
     
-    /**Instantiates module if module is a function.
-     * Checks first if module has domTool dependencies, if so;
-     * relays instaniate procedure to domReady event.
-     * 
-     * @param {Object} record
-     * @param {Array} args
-     * @return {void}
-     */
-    var instantiate = function(record, args) {
-        var module = record.module, instance;
-		if (typeof module == "function") {
-            log(Event.RUN, record.traits);
-			instance = create(module.prototype);
-			module.apply(instance, args);
-            log(Event.RAN, record.traits);
-		} else {
-            log(Event.ERROR, {
-                path: record.path,
-                message: "Nothing is run @ '"+record.path+"'",
-                resolution: "failed silently"
-            });
-        }
-        return instance;
-    },
     
-    /**Runs a module by simple path + args or through a descriptor object.
-     * When running a module through a descriptor object, we can do more.
-     * 
-     * Example using simple path:
-     * 
-     *     mikado.run('some.path.Module', 'argument1', argument2);
-     *     
-     * Example using descriptor:
-     * 
-     *     mikado.run({
-     *         path: 'some.path.Module',
-     *         args: ['argument1', 'argument2'],
-     *         // optional timeout override
-     *         timeout: 30000,
-     *         // optional method call chaining
-     *         invoke: [
-     *             {
-     *                 method: 'someMethod',
-     *                 args: ['argument1', 'argument2']
-     *             },
-     *             {
-     *                 method: 'otherMethod',
-     *                 args: ['argument1', 'argument2']
-     *             },
-     *         ],
-     *         // once done, run next descriptor, same options possible.
-     *         run: {
-     *             path: 'other.path.Module',
-     *             args: ['argument1', 'argument2']
-     *         }
-     *         
-     *     });
-     * 
-     * @param {String} path
-     * @param {Array} args
-     * @param {Object|undefined} descriptor
-     * @param {Number|undefined} timeout
-     * @return {void}
-     */
-    run = function(path, args, descriptor, timeout){
-        var record = registry[path];
-        
-        // try again when module is actually loaded.
-        if(!record) {
-            dispatcher.listen(Event.COMPLETE, function(e){
-                if(e.path === path) {
-                    dispatcher.deafen(Event.COMPLETE, arguments.callee);
-                    run(path, args, descriptor);
-                }
-            });
-            timeout = timeout ? Math.max(config.timeout, timeout) : config.timeout;
-            appendScripts([path], timeout);
+    
+    listen('complete', function(e){
+        var list = pending[e.path]
+        if(!list || !list.length) {
             return;
         }
-        
-        // relay #run till after DOM is ready and interactive.
-        if (!domLoaded && record.traits.domTool && !record.traits.domIgnore) {
-			dispatcher.listen(Event.DOMREADY, function(e) {
-                dispatcher.deafen(Event.DOMREADY, arguments.callee);
-                run(path, args, descriptor);
-			});
-            return;
-		}
-        
-        var instance = instantiate(record, args);
-        
-        if(instance && descriptor && descriptor.invoke) {
-            var pair;
-            while((pair = descriptor.invoke.shift())) {
-                if(typeof instance[pair.method] === 'function') {
-                    instance[pair.method].apply(instance, pair.args || []);
-                }
-            }
-        }
-        
-        if(descriptor && descriptor.run) {
-            mikado.run(descriptor.run);
-        }
-        
-    },
-    
-    /*---------------------------------------------------------------*
-     *                       final mikado API                        *
-     *---------------------------------------------------------------*/
-    
-    api = {
-        /**Add a module schema to mikado registry, following 'record' settings are possible:
-         * 
-         * REQUIRED:
-         * - path            Dot notated path to module file, relative to mikado root or repository config.
-         * - build           Builder method, return result will become the module.
-         * 
-         * OPTIONAL:
-         * - name            Name of module, will be parsed from path otherwise.
-         * - include         Dot notated paths to other modules the current module requires.
-         * - fetch           Dot notated paths to other modules the current module does NOT require,
-         *                   fetch can be used to force paralel loading of modules used by include dependencies.
-         * - allow           A list of dot notated paths of modules that are allowed to use current module.
-         *                   If a module loads a disallowed submodule, that module will not be made available.
-         * - traits          A hash of traits that will get passed to the eventObject in mikado events.
-         *     - domTool     Set to true if module relies on DOM ready event to be USED.
-         *     - domBuild    Set to true if module required DOM to be ready to BUILD.
-         *     - domIgnore   Set to true if a module inherits domTool trait, this will force the module
-         *                   to ignore domReady and simply run even if dom is not fully loaded.
-         * 
-         * @param {Object} record see above
-         * @return {void}
-         */
-        module: function(record) {
-			processRecord(record);
-		},
-        
-        /**Creates an instance of the module, loads module if not already present in registry.
-         * Any extra arguments will be passed to the module constructor.
-         * Will NOT instantiate module if the module is not a function.
-         * Will relay instantiation if module requires DOM to be ready due to having 'domTool' setting set to true.
-         * 
-         * @param {Object} path Dot notated path to module file relative to mikado root or repository.
-         * @param {Object} arguments Multiple possible, any argument the module might require.
-         * @return {Object} mikado
-         */
-        run: function() {
-			var args = slice.call(arguments);
-            if(typeof args[0] === 'string') {
-                run(args.shift(), args);
-            } else if(args.length === 1) {
-                run(args[0].path, args[0].args, args[0], args[0].timeout);
-            }
-			return this;
-		},
-        
-        /**Loads modules defined in list and overrides timeout if set.
-         * Cannot disable timeout mechanism, use config to disable timeout mechanism.
-         * 
-         * @param {Array} list Array with dot notated paths to modules for loading.
-         * @param {Number} timeout Time module can take to load in miliseconds.
-         * @return {Object} mikado
-         */
-        fetch: function(list, timeout) {
-			if(!(list instanceof Array)) {
-                return this;
-            }
-			var i = list.length;
-            while(i--) {
-                if(pending[list[i]]) {
+        var i = list.length
+        , j
+        , record, path;
+        while((record = list[--i])) {
+            j = record.fetch.length;
+            while(j && j--) {
+                path = record.fetch[j].path || record.fetch[j];
+                if (path === e.path) {
+                    record.fetch.splice(j, 1);
+                    !record.fetch.length && store(record);
                     list.splice(i, 1);
                 }
             }
-            if (list.length) {
-                appendScripts(list, timeout);
-            }
-			return this;
-		},
+        }
+    });
+    
+    // cleanup
+    listen('complete', function(e){
+        if(scripts[e.path]) {
+            scripts[e.path].parentNode.removeChild(scripts[e.path]);
+            delete scripts[e.path];
+        }
+        delete registry[e.path].eventData;
+        delete registry[e.path].timeout;
+        delete registry[e.path].include;
+        delete registry[e.path].fetch;
+        delete pending[e.path];
+    });
+    
+    global.mikado = {
         
-        /**Checks if module is present and thus loaded in registry.
-         * 
-         * @param {Object} path Dot notated path to module file relative to mikado root or repository.
-         * @return {Boolean} true if the module is present in registry.
-         */
-        available: function(path) {
-            return !!registry[path];
-        },
-        
-        /**Setter method for mikado config.
-         * - root                URI of module root folder, defaults to mikado root folder.
-         * - timeout             Main timeout for module loading in miliseconds, 
-         *                       set to 0 to disable timeout mechanism. defaults to 1500 ms.
-         * - force               Force any path that leads to module name to a default path.
-         *                       For example: force : {"Selector":"some.Selector"} will
-         *                       force any other path that leads to a Selector module to 
-         *                       "some.Selector".
-         * - repositories        Maps the start part of a possible path to another script
-         *                       repository. For example: 
-         *                           repositories : {
-         *                               "test.home" : "/src/"
-         *                           }
-         *                       maps any path thats starts with "test.home" to the /src/ directory.
-         *                       Can also be used to load modules from another domain.
-         * 
-         * @param {Object} params
-         */
-        config: function(params) {
-            for (var key in params) {
-                if (/(?:repositories|force)/.test(key)) {
-                    for (var name in params[key]) {
-                        if (typeof params[key][name] == "string") {
-                            config[key][name] = params[key][name];
-                        }
-                    }
-                } else if (config[key]) {
-                    config[key] = params[key];
-                }
-            }
-            return this;
-        },
-        
-        /**Adds an event listener for mikado events.
-         * Events can be one of the following (event object described after each event)
-         * - loading {target:"path", stamp:"timestamp"}
-         * - loaded {target:"path", stamp:"timestamp"}
-         * - complete {target:"path", stamp:"timestamp"}
-         * - error {message:"text", resolution:"text", stamp:"timestamp"}
-         * 
-         * @param {String} eventType
-         * @param {Function} handler
-         * @return {Object} mikado
-         */
-        subscribe: function(eventType, handler){
-            if(eventType === Event.DOMREADY && domLoaded) {
-                handler(domReadyEvent);
-                return this;
-            }
-            dispatcher.listen(eventType, handler)
-            return this;
-        },
-        
-        /**Removes an event listener.
-         * 
-         * @param {String} eventType
-         * @param {Function} handler
-         * @return {Object} mikado
-         */
-        unsubscribe: function(eventType, handler){
-            dispatcher.deafen(eventType, handler)
-            return this;
-        },
-        
-        /**Returns the log items corresponding with the event types passed as arguments.
-         * 
-         * @param {String} type EventType, multiple possible.
-         * @return {Array} list of requested log items, empty if none present.
-         */
-        getLog: function(type /*, multiple possible*/){
-            var re = new RegExp("^(?:"+slice.call(arguments).join("|")+")$");
-            var i = eventLog.length, log = [];
-            while(i--){
-                if(re.test(eventLog[i].type) || !type) {
-                    log.unshift(eventLog[i]);
-                }
-            }
-            return log;
-        },
-        
-        warn: function(){
-            if (!warningsEnabled) {
-                dispatcher.listen(Event.ERROR, function(e) {
-                    alert(e.message + '\n' + e.resolution + '\n' + e.path);
-                });
-                warningsEnabled = 1;
-            }
+        module: function(record){
+            process(record);
         }
         
-    };
+        , run: function(p /* arguments */){
+            var args = slice.call(arguments);
+            typeof p === 'string' ? run({
+                path: p,
+                args: args.shift() && args
+            }) : run(p);
+            return this;
+        }
         
-   // unleash mikado
-   GLOBAL.mikado =  api;
-
-})(this, this.document);
+        , listen: function(type, listener, scope){
+            listen(type, listener, scope);
+            return this;
+        }
+        
+        , deafen: function(type, listener, scope){
+            deafen(type, listener, scope);
+            return this;
+        }
+        
+        , available: function(path){
+            return !!registry[path];
+        }
+        
+        , pending: function(path){
+            return !!pending[path];
+        }
+        
+        , repo : function(path, uri) {
+			if(typeof path === 'string'){
+				repositories[path] = uri
+			} else {
+				for(var key in path){
+					path.hasOwnProperty(key) && (repositories[key] = path[key]);
+				}
+			}
+            return this;
+        }
+		
+		, alias : function(alias, path){
+			if(typeof alias === 'string'){
+				!aliases[alias] && (aliases[alias] = path);
+			} else {
+				for(var key in alias){
+                    alias.hasOwnProperty(key) && !aliases[key] && (aliases[key] = alias[key]);
+                }
+			}
+			return this;
+		}
+		
+		, force : function(name, path){
+			if(typeof name === 'string'){
+				forced[name] = path;
+			} else {
+				for(var n in name) {
+					name.hasOwnProperty(n) && (forced[n] = name[n]);
+				}
+			}
+			return this;
+		}
+		
+		, timeout : function(t){
+			if(t && t >= 1500) timeout = t;
+			return timeout;
+		}
+		
+		, list : function(){
+			var list = [];
+			for(var path in registry) {
+				registry.hasOwnProperty(path) && list.push(key);
+			}
+			return list;
+		}
+        
+    };
+    
+})(this);
