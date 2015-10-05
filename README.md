@@ -4,7 +4,7 @@ Mikado
 **** Casual Message ****
 
 * Moved on to RC3!
-* Wiki is becomming a mess, really need to work on documentation for just mikado.js.
+* Wiki is becoming a mess, really need to work on documentation for just mikado.js.
 * Delaying mikado/home framework and demo till documentation is done.
 
 
